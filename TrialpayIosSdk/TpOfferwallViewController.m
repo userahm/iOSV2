@@ -6,83 +6,61 @@
 //
 
 #import "TpOfferwallViewController.h"
-
-// Create NSDLog - a debug call available on debug mode only
-#ifdef DEBUG
-#define NSDLog(FORMAT, ...) fprintf(stderr,"[TpOfferwallViewController] %s\n", [[NSString stringWithFormat:FORMAT, ##__VA_ARGS__] UTF8String]);
-#else
-#define NSDLog(...)
-#endif
+#import "TpUtils.h"
 
 @interface TpOfferwallViewController ()
-
 @end
 
 @implementation TpOfferwallViewController
-@synthesize offerwallUrl;
-@synthesize vic;
-@synthesize sid;
-@synthesize offerwallContainer;
 
-/************ Init with VIC, SID ************/
-- (id) initWithVic:(NSString *)vicValue sid:(NSString *)sidValue {
-    NSDLog(@"initWithVic %@, %@", vicValue, sidValue);
+#pragma mark - Init with touchpoint name
+- (id)initWithTouchpointName:(NSString *)touchpointName {
+    TPLog(@"initWithTouchpointName %@", touchpointName);
     self = [self init];
-
-    self.vic = vicValue;
-    self.sid = sidValue;
+    
+    _touchpointName = touchpointName;
     
     return self;
 }
 
-- (NSString *) getOfferwallUrl {
-    NSString *url = [NSString stringWithFormat:@"%@%@?sid=%@&appver=%@&idfa=%@&sdkver=%@",
-            [TpUtils getDispatchPath],
-            vic,
-            sid,
-            [TpUtils getAppver],
-            [TpUtils getIdfa],
-            [[BaseTrialpayManager getInstance] getSdkVer]];
-    
-    return url;
-}
-
-/************ loadview (UIViewController) ************/
+#pragma mark - View Lifecycle
 -(void)loadView {
-    NSDLog(@"loadView");
+    TPLogEnter;
     [[UIApplication sharedApplication] setStatusBarHidden:[UIApplication sharedApplication].statusBarHidden withAnimation:UIStatusBarAnimationFade];
-    offerwallContainer = [[TpWebView alloc] initWithFrame:CGRectMake(0.0, 0.0, 320.0, 460.0)];
-    self.view = offerwallContainer;
-    offerwallContainer.delegate = self;
+    _tpWebView = [[TpWebView alloc] initWithFrame:CGRectMake(0.0, 0.0, 320.0, 460.0)];
+    self.view = self.tpWebView;
+    self.tpWebView.delegate = self;
 }
 
-/************ viewDidLoad (UIViewController) ************/
 - (void)viewDidLoad {
-    NSDLog(@"viewDidLoad");
-    offerwallUrl = [self getOfferwallUrl];
-    NSDLog(@"launchOfferwall %@", offerwallUrl);
+    TPLogEnter;
 
     [super viewDidLoad];
     
-    [offerwallContainer loadRequest:offerwallUrl];
+    [self.tpWebView loadOfferwallForTouchpoint:self.touchpointName];
 }
 
-/************ Done button pushed - for done button selector ************/
+#pragma mark - Done button pushed - for done button selector
 - (void)tpWebView:(TpWebView *)tpWebView donePushed:(id)sender {
-    NSDLog(@"tpWebView donePushed");
-    [self dismissModalViewControllerAnimated:YES];
+    TPLogEnter;
+  
+    if ([self respondsToSelector:@selector(dismissViewControllerAnimated:animated:completion:)]) {
+        [self dismissViewControllerAnimated:YES completion:nil];
+    } else {
+        // if iOS version < 6 is used
+        [self dismissModalViewControllerAnimated:YES];
+    }
+  
     [self.delegate tpOfferwallViewController:self close:sender];
 }
 
-/************ shouldAutorotateToInterfaceOrientation (UIViewController) ************/
-- (BOOL) shouldAutorotateToInterfaceOrientation:(UIInterfaceOrientation)interfaceOrientation
-{
+#pragma mark - Autorotate for both ios5 and ios6
+- (BOOL)shouldAutorotateToInterfaceOrientation:(UIInterfaceOrientation)interfaceOrientation {
     //support for all orientation change
     return YES;
 }
 
-/************ supportedInterfaceOrientations (UIViewController) ************/
-- (NSUInteger)supportedInterfaceOrientations{
+- (NSUInteger)supportedInterfaceOrientations {
 #if __IPHONE_OS_VERSION_MAX_ALLOWED > __IPHONE_5_1
     return UIInterfaceOrientationMaskAll;
 #else

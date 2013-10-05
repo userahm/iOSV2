@@ -2,49 +2,12 @@
 //
 //  TpBalance.m
 //
-//  Wrapper class for TrialPay Balance API calls
-//
-//  Recommended usage (Please note, we recommend Steps 2 and 3 be performed asynchronously):
-//  (1) Instantiate a TpBalance object with your specific vic + sid combination on
-//      view load or on app load (whenever the user wants to see their balance) by calling
-//      initWithVic:...sid:...
-//  (2) When you want to retrieve the latest balance, make a call to [TpBalance queryBalanceInfo]
-//      and store the information returned
-//  (3) Acknowledge to the TrialPay servers with the values returned from the call to queryBalanceInfo
-//      by calling [TpBalance acknowledgeBalanceInfo:....]
-//
-//  Sample.m
-// - (void)viewDidLoad {
-//     ...
-//     myTrialpaySampleObject = [[TpBalance alloc] initWithVic:<Your VIC as provided by your AM> sid:<Current User identifier>];
-//     ...
-//   }
-//  ...
-//
-// - (void)balanceQueryAndWithdraw {
-//     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-//       NSDictionary *latestBalanceInfo = [myTrialpaySampleObject queryBalanceInfo];
-//
-//       NSNumber* differentialBalance = [latestBalanceInfo objectForKey:@"balance"];
-//
-//       Boolean ackSuccess = [myTrialpaySampleObject acknowledgeBalanceInfo: latestBalanceInfo];
-//
-//       if (ackSuccess) {
-//         // Increment the user credits balance here by amount differentialBalance and update the display (You can update display by using performSelectorOnMainThread)
-//       }
-//    });
-//
-// }
-//
-//
 
 #import "TpBalance.h"
-
-#ifdef DEBUG
-#define NSDLog(FORMAT, ...) fprintf(stderr,"[TpBalance] %s\n", [[NSString stringWithFormat:FORMAT, ##__VA_ARGS__] UTF8String]);
-#else
-#define NSDLog(...)
-#endif
+#import "TpConstants.h"
+#import "TpUrlManager.h"
+#import "TpUtils.h"
+#import "TpSdkConstants.h"
 
 @implementation TpBalance
 
@@ -55,7 +18,7 @@
  
  return: Initialized TpBalance object with preset vic and sid.
  **/
--(TpBalance*) initWithVic: (NSString*) vic sid: (NSString*) sid {
+- (TpBalance *)initWithVic:(NSString *)vic sid:(NSString *)sid {
     self = [super init];
     
     if (self) {
@@ -66,12 +29,20 @@
     return self;
 }
 
--(void) setSid: (NSString*) sid {
+- (void)setSid:(NSString *)sid {
     _sid = sid;
 }
 
--(void) setVic: (NSString*) vic {
+- (void)setVic:(NSString *)vic {
     _vic = vic;
+}
+
+static NSError *__lastError;
++(NSError*)consumeLastError {
+    NSError *ret = __lastError;
+    __lastError = nil;
+    TPLog(@"consuming %@", ret);
+    return ret;
 }
 
 /**
@@ -84,53 +55,74 @@
     failure: nil
  **/
  
--(NSDictionary*) queryBalanceInfo {
-    NSDictionary* balanceInfo = nil;
+- (NSDictionary *)queryBalanceInfo {
+    NSDictionary *balanceInfo = nil;
     double currentTime = [[NSDate date] timeIntervalSince1970];
-    
-    // Check to see if we are in the valid timeframe
-    if (_lastQueryTime != 0 && _timeoutInSeconds != 0 && currentTime - _lastQueryTime < _timeoutInSeconds) {
-        balanceInfo = [NSDictionary dictionaryWithDictionary:_lastQueryInfo];
-        return balanceInfo;
-    }
-    
-    NSString* balanceEndpoint = [NSString stringWithFormat:@"%@?vic=%@&sid=%@", [TpUtils getBalancePath], _vic, _sid];
-    NSDLog(@"balanceEndpoint = %@",balanceEndpoint);
-    NSData* endpointResponseData = [NSData dataWithContentsOfURL:[NSURL URLWithString:balanceEndpoint]];
-    
-    NSError* decodeError = nil;
-    
-    NSNumber *queriedBalance = nil;
-    NSNumber *queriedSecondsValid = nil;
-    
-    if (endpointResponseData != nil) {
-       balanceInfo = [NSJSONSerialization
-                              JSONObjectWithData:endpointResponseData
-                              options:kNilOptions
-                              error:&decodeError];
-        
-        queriedBalance = [balanceInfo objectForKey:@"balance"];
-        queriedSecondsValid = [balanceInfo objectForKey:@"seconds_valid"];
-        
-        if (decodeError != nil) {
-            NSLog(@"TrialPay API Balance Query Error: %@", decodeError);
+
+#if defined(__TRIALPAY_USE_EXCEPTIONS)
+    @try {
+#endif
+        // Check to see if we are in the valid timeframe
+        if (_lastQueryTime != 0 && _timeoutInSeconds != 0 && currentTime - _lastQueryTime < _timeoutInSeconds) {
+            balanceInfo = [NSDictionary dictionaryWithDictionary:_lastQueryInfo];
+            return balanceInfo;
+        }
+
+        NSString* balanceEndpoint = [TpUrlManager balancePathWithVic:_vic andSid:_sid];
+        TPLog(@"balanceEndpoint = %@",balanceEndpoint);
+
+        NSError *downloadError = nil;
+        NSData* endpointResponseData = [NSData dataWithContentsOfURL:[NSURL URLWithString:balanceEndpoint] options:NSDataReadingMappedIfSafe error:&downloadError];
+        if (downloadError) {
+            TPCustomerError(@"TrialPay API Balance Query Error", @"TrialPay API Balance Query Error: %@", downloadError);
+            __lastError = downloadError;
             return nil;
         }
-        
-        if (queriedBalance == nil) {
-            NSLog (@"Balance not returned from TrialPay API");
+        NSError* decodeError = nil;
+
+        NSNumber *queriedBalance = nil;
+        NSNumber *queriedSecondsValid = nil;
+
+        if (endpointResponseData != nil) {
+            balanceInfo = [NSJSONSerialization
+                    JSONObjectWithData:endpointResponseData
+                               options:NSJSONReadingMutableContainers
+                                 error:&decodeError];
+
+            queriedBalance = [balanceInfo objectForKey:kTPKeyBalance];
+            queriedSecondsValid = [balanceInfo objectForKey:@"seconds_valid"];
+
+            if (decodeError != nil) {
+                TPCustomerError(@"TrialPay API Balance Query Error", @"TrialPay API Balance Query Error: %@", decodeError);
+                __lastError = decodeError;
+                return nil;
+            }
+
+            if (queriedBalance == nil) {
+                TPCustomerLog(@"Balance not returned from TrialPay API", @"Balance not returned from TrialPay API");
+                __lastError = [NSError errorWithDomain:@"TrialpayBalanceAPI" code:1 userInfo:[NSDictionary dictionaryWithObjectsAndKeys:NSLocalizedString(@"Balance not returned from TrialPay API", @"Balance not returned from TrialPay API"), NSLocalizedDescriptionKey, nil]];
+                return nil;
+            }
+
+            _lastQueryInfo = [NSMutableDictionary dictionaryWithDictionary: balanceInfo];
+            _timeoutInSeconds = [queriedSecondsValid doubleValue];
+            _lastQueryTime = currentTime;
+
+        } else {
+            TPCustomerError(@"Trialpay Balance API did not return balance data: Please verify setup and parameters are correct", @"Trialpay Balance API did not return balance data: Please verify setup and parameters are correct");
+            __lastError = [NSError errorWithDomain:@"TrialpayBalanceAPI" code:2 userInfo:[NSDictionary dictionaryWithObjectsAndKeys:NSLocalizedString(@"Trialpay Balance API did not return balance data: Please verify setup and parameters are correct", @"Trialpay Balance API did not return balance data: Please verify setup and parameters are correct"), NSLocalizedDescriptionKey, nil]];
             return nil;
         }
-                
-        _lastQueryInfo = [NSMutableDictionary dictionaryWithDictionary: balanceInfo];
-        _timeoutInSeconds = [queriedSecondsValid doubleValue];
-        _lastQueryTime = currentTime;
-        
-    } else {
-        NSLog (@"Trialpay Balance API did not return balance data: Please verify setup and parameters are correct");
+#if defined(__TRIALPAY_USE_EXCEPTIONS)
+    } @catch (NSException *exception) {
+#if DEBUG
+        TPLog(@"%@", [exception callStackSymbols]);
+#endif
+        TPCustomerError(@"Trialpay Balance API executed with errors: {}", @"Trialpay Balance API executed with errors: %@", exception);
+        __lastError = [NSError errorWithDomain:@"TrialpayBalanceAPI" code:3 userInfo:[NSDictionary dictionaryWithObjectsAndKeys:exception.description, NSLocalizedDescriptionKey, nil]];
         return nil;
     }
-    
+#endif
     return balanceInfo;
 }
 
@@ -141,39 +133,45 @@
     NSDictionary balanceInfo: The NSDictionary returned from queryBalanceInfo. This will contain at the very least a key 'balance' with NSNumber Type
  
  return:
-    boolean: True if successful, false otherwise
+    BOOL: True if successful, false otherwise
  **/
 
--(Boolean) acknowledgeBalanceInfo:(NSDictionary *)balanceInfo {
-    NSNumber* balance = [balanceInfo objectForKey:@"balance"];
-    
-    // If the ack is happening with 0 balance, just automatically return true
-    if ([balance intValue] == 0) {
-        return true;
-    }
-    
-    NSString *acknowledgeEndpoint = [NSString stringWithFormat:@"%@?vic=%@&sid=%@", [TpUtils getBalancePath], _vic, _sid];
-    NSDLog(@"balanceEndpoint = %@",acknowledgeEndpoint);
-    for (id key in balanceInfo) {
-        id value = [balanceInfo objectForKey: key];
-        acknowledgeEndpoint = [NSString stringWithFormat:@"%@&%@=%@", acknowledgeEndpoint, key, value];
-    }
-    
-    NSError* ackError;
+-(BOOL) acknowledgeBalanceInfo:(NSDictionary *)balanceInfo {
+    NSNumber* balance = [balanceInfo objectForKey:kTPKeyBalance];
 
-    NSString* ackResponseString = [NSString stringWithContentsOfURL:[NSURL URLWithString:acknowledgeEndpoint] encoding:NSUTF8StringEncoding error:&ackError];
-    
-    if (ackResponseString == nil) {
-        NSLog(@"Trialpay Ack Balance API error: Please verify your account setup and parameters");
+#if defined(__TRIALPAY_USE_EXCEPTIONS)
+    @try {
+#endif
+        // If the ack is happening with 0 balance, just automatically return true
+        if ([balance intValue] == 0) {
+            return true;
+        }
+
+        NSString *acknowledgeEndpoint = [TpUrlManager balancePathWithVic:_vic andSid:_sid usingBalanceInfo:balanceInfo];
+        NSError* ackError;
+        NSString* ackResponseString = [NSString stringWithContentsOfURL:[NSURL URLWithString:acknowledgeEndpoint] encoding:NSUTF8StringEncoding error:&ackError];
+        
+        if (ackResponseString == nil) {
+            TPCustomerError(@"Trialpay Ack Balance API error: Please verify your account setup and parameters", @"Trialpay Ack Balance API error: Please verify your account setup and parameters");
+            _timeoutInSeconds = 0;
+            return false;
+        }
+        
+        if ([ackResponseString isEqualToString:@"1"]) {
+            [_lastQueryInfo setObject: [NSNumber numberWithInt:0] forKey:kTPKeyBalance];
+            return true;
+        }
         _timeoutInSeconds = 0;
+#if defined(__TRIALPAY_USE_EXCEPTIONS)
+    } @catch (NSException *exception) {
+#if DEBUG
+        TPLog(@"%@", [exception callStackSymbols]);
+#endif
+        TPCustomerError(@"Trialpay Balance API executed with errors: {}", @"Trialpay Balance API executed with errors: %@", exception);
+        __lastError = [NSError errorWithDomain:@"TrialpayBalanceAPI" code:3 userInfo:[NSDictionary dictionaryWithObjectsAndKeys:exception.description, NSLocalizedDescriptionKey, nil]];
         return false;
     }
-    
-    if ([ackResponseString isEqualToString:@"1"]) {
-        [_lastQueryInfo setObject: [NSNumber numberWithInt:0] forKey:@"balance"];
-        return true;
-    }
-    _timeoutInSeconds = 0;
+#endif
     return false;
 }
 

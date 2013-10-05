@@ -10,12 +10,12 @@
 
 @implementation TpUtils
 
-+ (NSString*) getAppver {
++ (NSString*) appVersion {
     NSString* version = [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleVersion"];
     return [NSString stringWithFormat:@"%@", version];
 }
 
-+ (NSString*) getIdfa {
++ (NSString*) idfa {
 #if __IPHONE_OS_VERSION_MAX_ALLOWED > __IPHONE_5_1
     if (NSClassFromString(@"ASIdentifierManager")) {
         return [[[ASIdentifierManager sharedManager] advertisingIdentifier] UUIDString];
@@ -24,7 +24,7 @@
     return @"";
 }
 
-+ (NSString *)getMacAddress {
++ (NSString *)macAddress {
     int                 mgmtInfoBase[6];
     char                *msgBuffer = NULL;
     size_t              length;
@@ -60,9 +60,9 @@
         }
     }
     
-    // Befor going any further...
+    // Before going any further...
     if (errorFlag != NULL) {
-        NSLog(@"Error: %@", errorFlag);
+        TPLog(@"Error: %@", errorFlag);
         if (msgBuffer != NULL) {
             free(msgBuffer);
         }
@@ -76,7 +76,7 @@
     socketStruct = (struct sockaddr_dl *) (interfaceMsgStruct + 1);
     
     // Copy link layer address data in socket structure to an array
-    memcpy(&macAddress, socketStruct->sdl_data + socketStruct->sdl_nlen, 6);
+    memcpy((void*)&macAddress, socketStruct->sdl_data + socketStruct->sdl_nlen, 6);
     
     // Read from char array into a string object, into traditional Mac address format
     NSString *macAddressString = [NSString stringWithFormat:@"%02X%02X%02X%02X%02X%02X",
@@ -89,7 +89,7 @@
     return macAddressString;
 }
 
-+(NSString*) sha1:(NSString*)input {
++ (NSString *)sha1:(NSString *)input {
     const char *cstr = [input cStringUsingEncoding:NSUTF8StringEncoding];
     NSData *data = [NSData dataWithBytes:cstr length:input.length];
     
@@ -97,7 +97,7 @@
     
     CC_SHA1(data.bytes, data.length, digest);
     
-    NSMutableString* output = [NSMutableString stringWithCapacity:CC_SHA1_DIGEST_LENGTH * 2];
+    NSMutableString *output = [NSMutableString stringWithCapacity:CC_SHA1_DIGEST_LENGTH * 2];
     
     for(int i = 0; i < CC_SHA1_DIGEST_LENGTH; i++)
         [output appendFormat:@"%02x", digest[i]];
@@ -105,12 +105,17 @@
     return output;
 }
 
-+ (NSString*) getDispatchPath {
-    return [NSString stringWithFormat:@"%@%@%@", @"https://www.", @"trialpay.com/", @"dispatch/"];
+/*
+ * Returns the code for given gender ("M" for Male, "F" for Female and "U" for Unknown).
+ */
++ (NSString *)genderCodeForValue:(Gender)gender {
+    TPLog(@"getGenderCodeForValue:%u", gender);
+    switch (gender) {
+        case Male: return @"M";
+        case Female: return @"F";
+        default: return @"U"; // unknown gender
+    }
 }
 
-+ (NSString*) getBalancePath {
-    return [NSString stringWithFormat:@"%@%@%@", @"https://www.", @"trialpay.com/", @"api/balance/"];
-}
 
 @end

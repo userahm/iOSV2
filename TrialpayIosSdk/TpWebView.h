@@ -13,10 +13,7 @@
 - (void)tpWebView:(TpWebView *)tpWebView donePushed:(id)sender;
 @end
 
-@interface TpWebView : UIView <UIWebViewDelegate, UIAlertViewDelegate> {
-    // Local class var to hold offer wall URL
-    NSString* baseOfferwallUrl;
-}
+@interface TpWebView : UIView <UIWebViewDelegate, UIAlertViewDelegate> 
 
 @property (strong, nonatomic) IBOutlet UIView *mainView;
 @property (strong, nonatomic) IBOutlet UIBarButtonItem *doneButton;
@@ -27,6 +24,7 @@
 
 @property (strong, nonatomic) id<TpWebViewDelegate> delegate;
 
-- (void)loadRequest:(NSString*)url;
+- (BOOL)loadOfferwallForTouchpoint:(NSString *)touchpointName;
+- (void)loadRequest:(NSString *)url;
 
 @end

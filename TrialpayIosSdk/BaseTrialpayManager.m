@@ -1,110 +1,88 @@
 #import "BaseTrialpayManager.h"
+#import "TpDataStore.h"
 
-// Create NSDLog - a debug call available on debug mode only
-#ifdef DEBUG
-#define NSDLog(FORMAT, ...) fprintf(stderr,"[TpBaseManager] %s\n", [[NSString stringWithFormat:FORMAT, ##__VA_ARGS__] UTF8String]);
-#else
-#define NSDLog(...)
-#endif
+// how many UNIX timestamps for the customer's last sessions will be stored
+#define TP_MAX_VISIT_TIMESTAMPS 5
 
-
-@interface BaseTrialpayManager()
-- (NSMutableDictionary *) getDataDictionary;
-- (BOOL) saveDataDictionary;
-- (BOOL) setDataWithValue:(id)value forKey:(NSString *)key;
-
+@interface BaseTrialpayManager() {
+    __block BOOL _isShowingOfferwall; // will be modified by a block
+}
 @property (strong, nonatomic) NSCondition *balanceUpdateCondition;
+@property (strong, nonatomic) TPDelegateBlock balanceUpdateBlock;
+@property (strong, nonatomic) TPDelegateBlock offerwallCloseBlock;
 @end
 
-static BaseTrialpayManager *baseTrialpayManagerInstance;
 
 @implementation BaseTrialpayManager
-@synthesize delegate;
-@synthesize balanceUpdateCondition;
 
-NSLock *trialpayManagerDictionaryLock;
-
-/* ************* Initialization ************* */
-
+#pragma mark - Initialization
+BaseTrialpayManager *__baseTrialpayManager;
 - (id)init {
-    NSDLog(@"init");
-    self = [super init];
-    trialpayManagerDictionaryLock = [[NSLock alloc] init];
+    TPLogEnter;
+    if ((self = [super init])) {
+        _isShowingOfferwall = NO;
+        [self appLoaded];
+        __baseTrialpayManager = self;
+    }
     return self;
 }
 
-+ (BaseTrialpayManager *)getInstance {
-    return baseTrialpayManagerInstance;
-}
-
-+ (void)setInstance:(BaseTrialpayManager*)instance {
-    baseTrialpayManagerInstance = instance;
-}
-
-/* ************* Get SDK Version ************* */
-- (NSString*) getSdkVer {
-    return @"ios.2.73652";
-}
-
-/* ************* Handling dictionary in TrialpayManager.plist ************* */
-NSMutableDictionary *trialpayManagerDictionary = nil;
-
-- (NSMutableDictionary *) getDataDictionary {
-    NSDLog(@"getDataDictionary");
-    if (nil == trialpayManagerDictionary) {
-        // Get path
-        NSString *path = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) lastObject];
-        path = [path stringByAppendingPathComponent:@"TrialpayManager.plist"];
-        
-        // If the file exists - get the content from there. If not, create an empty dictionary
-        if ([[NSFileManager defaultManager] fileExistsAtPath:path]) {
-            trialpayManagerDictionary = [[NSMutableDictionary alloc] initWithContentsOfFile:path];
-        } else {
-            trialpayManagerDictionary = [[NSMutableDictionary alloc] init];
-        }
++ (BaseTrialpayManager *)sharedInstance {
+    if (nil == __baseTrialpayManager) {
+        TPCustomerError(@"TrialpayManager Instance is not accessible, please invoke TrialpayManager:getInstance", @"TrialpayManager Instance is not accessible, please invoke TrialpayManager:getInstance");
     }
-    return trialpayManagerDictionary;
+    return __baseTrialpayManager;
 }
 
-- (BOOL) saveDataDictionary {
-    NSDLog(@"saveDataDictionary");
-    if (nil != trialpayManagerDictionary) {
-        NSString *path = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) lastObject];
-        path = [path stringByAppendingPathComponent:@"TrialpayManager.plist"];
-        return [trialpayManagerDictionary writeToFile:path atomically:YES];
+/*
+ * This method should be called after the application has been loaded.
+ */
+- (void)appLoaded {
+    TPLogEnter;
+    
+    // log the current session time start
+    NSNumber *userCreationTime = [[TpDataStore sharedInstance] dataValueForKey:kTPKeyUserCreationTime];
+
+    if (userCreationTime == nil) {
+        userCreationTime = [NSNumber numberWithLong:(long)[[NSDate date] timeIntervalSince1970]];
+        [[TpDataStore sharedInstance] setDataWithValue:userCreationTime forKey:kTPKeyUserCreationTime];
     }
-    return NO;
+
+    NSMutableArray *visitTimestamps = [[TpDataStore sharedInstance] dataValueForKey:kTPKeyVisitTimestamps];
+    
+    if (visitTimestamps == nil) {
+        visitTimestamps = [NSMutableArray array];
+    }
+    
+    NSNumber *currentTimestamp = [NSNumber numberWithLong:(long)[[NSDate date] timeIntervalSince1970]];
+    
+    if ([visitTimestamps count] == TP_MAX_VISIT_TIMESTAMPS) {
+        [visitTimestamps removeLastObject];
+    }
+    
+    [visitTimestamps insertObject:currentTimestamp atIndex:0];
+    
+    [[TpDataStore sharedInstance] setDataWithValue:visitTimestamps forKey:kTPKeyVisitTimestamps];
 }
 
-- (BOOL) setDataWithValue:(NSObject *)value forKey:(NSString *)key {
-    NSDLog(@"setDataWithValue:%@ forKey:%@)", value, key);
-    [trialpayManagerDictionaryLock lock];
-    NSMutableDictionary* dict = [self getDataDictionary];
-    [dict setValue:value forKey:key];
-    BOOL res = [self saveDataDictionary];
-    [trialpayManagerDictionaryLock unlock];
-    return res;
+#pragma mark - Get SDK Version
++ (NSString*)sdkVersion {
+    return @"ios.2.76701";
 }
 
-- (id) getDataValueForKey:(NSString *)key {
-    NSDLog(@"getDataValueForKey:%@", key);
-    NSDictionary *trialpayManagerDictionary = [self getDataDictionary];
-    return [trialpayManagerDictionary valueForKey:key];
+#pragma mark - BaseTrialpayManager getter/setter
+
+- (void)setSid:(NSString *)sid {
+    TPLog(@"setSid:%@", sid);
+    [[TpDataStore sharedInstance] setDataWithValue:sid forKey:kTPSid];
 }
 
-/* ************* BaseTrialpayManager getter/setter ************* */
-
-- (void) setSid:(NSString *)sid {
-    NSDLog(@"setSid:%@", sid);
-    [self setDataWithValue:sid forKey:@"sid"];
-}
-
-- (NSString *) getSid {
-    NSString *sid = [self getDataValueForKey:@"sid"];
+- (NSString *)sid {
+    NSString *sid = [[TpDataStore sharedInstance] dataValueForKey:kTPSid];
     if (nil == sid) {
-        sid = [TpUtils getIdfa];
+        sid = [TpUtils idfa];
         if ([@"" isEqual:sid]) {
-            sid = [TpUtils getMacAddress];
+            sid = [TpUtils macAddress];
             if ([@"" isEqual:sid]) {
                 // since we're using local storage, using the current timestamp and a random number should be fine
                 double time = [[NSDate date] timeIntervalSince1970];
@@ -117,104 +95,198 @@ NSMutableDictionary *trialpayManagerDictionary = nil;
     return sid;
 }
 
-- (NSMutableDictionary *) getTouchpointNames {
-    NSMutableDictionary *touchpointNames = [self getDataValueForKey:@"touchpointNames"];
+- (NSMutableDictionary *)touchpointNames {
+    NSMutableDictionary *touchpointNames = [[TpDataStore sharedInstance] dataValueForKey:kTPKeyTouchpointNames];
     if (nil == touchpointNames) {
         touchpointNames = [[NSMutableDictionary alloc] init];
     }
     return touchpointNames;
 }
 
-- (NSMutableArray *) getVics {
-    NSMutableArray *vics = [self getDataValueForKey:@"vics"];
+- (NSMutableArray *)vics {
+    NSMutableArray *vics = [[TpDataStore sharedInstance] dataValueForKey:kTPKeyVICs];
     if (nil == vics) {
         vics = [[NSMutableArray alloc] init];
     }
     return vics;
 }
 
-- (NSMutableDictionary *) getBalances {
-    NSMutableDictionary *balances = [self getDataValueForKey:@"balances"];
+- (NSMutableDictionary *)balances {
+    NSMutableDictionary *balances = [[TpDataStore sharedInstance] dataValueForKey:kTPKeyBalances];
     if (nil == balances) {
         balances = [[NSMutableDictionary alloc] init];
     }
     return balances;
 }
 
-- (void) registerVic:(NSString *)vic withTouchpoint:(NSString *)touchpointName {
-    NSDLog(@"registerVic:%@, withTouchpoint:%@", vic, touchpointName);
+- (void)registerVic:(NSString *)vic withTouchpoint:(NSString *)touchpointName {
+    TPLog(@"registerVic:%@, withTouchpoint:%@", vic, touchpointName);
     // Get preregistered names
-    NSMutableDictionary *touchpointNames = [self getTouchpointNames];
+    NSMutableDictionary *touchpointNames = [self touchpointNames];
     // If the name is there and is set correctly - skip
     if ([vic isEqualToString:[touchpointNames valueForKey:touchpointName]]) {
         return;
     }
     // Get the list of vics
-    NSMutableArray *vics = [self getVics];
+    NSMutableArray *vics = [self vics];
     // If the new VIC name does not exist in the list (expected) add the vic to the vic list
     if (![vics containsObject:vic]) {
         [vics addObject:vic];
-        [self setDataWithValue:vics forKey:@"vics"];
+        [[TpDataStore sharedInstance] setDataWithValue:vics forKey:kTPKeyVICs];
     }
     // Register the vic under the given touchpointName
     [touchpointNames setValue:vic forKey:touchpointName];
-    [self setDataWithValue:touchpointNames forKey:@"touchpointNames"];
+    [[TpDataStore sharedInstance] setDataWithValue:touchpointNames forKey:kTPKeyTouchpointNames];
 }
 
-/* ************* Offerwall ************* */
-
-- (void) openOfferwallForTouchpoint:(NSString *)touchpointName {
-    NSDLog(@"openOfferwallForTouchpoint:%@", touchpointName);
-    NSDictionary *touchpointNames = [self getTouchpointNames];
+- (NSString *)vicForTouchpoint:(NSString *)touchpointName {
+    TPLog(@"vicForTouchpoint:%@", touchpointName);
+    NSDictionary *touchpointNames = [self touchpointNames];
+    
     NSString *vic = [touchpointNames valueForKey:touchpointName];
     if (nil == vic) {
-        NSLog(@"TrialpayManager: Could not find VIC for %@. Skipping offerwall.", touchpointName);
-        return;
+        TPLog(@"Could not find VIC for touchpoint %@", touchpointName);
     }
-    NSString *sid = [self getSid];
+    return vic;
+}
+
+/*
+ * Should be called on user registration or during initialization.
+ *
+ * NOTE: affects all touchpoints
+ */
+- (void)setAge:(int)age {
+    TPLog(@"setAge: %d", age);
+    [[TpDataStore sharedInstance] setDataWithValue:[NSNumber numberWithInt:age] forKey:kTPKeyAge];
+}
+
+/*
+ * Should be called on user registration or during initialization.
+ *
+ * NOTE: affects all touchpoints
+ */
+- (void)setGender:(Gender)gender {
+    TPLog(@"setGender: %u", gender);
+    [[TpDataStore sharedInstance] setDataWithValue:[NSNumber numberWithInt:gender] forKey:kTPKeyGender];
+}
+
+/*
+ * Should be called whenever there's a level/stage update in the game.
+ * Can be called right before the touchpoint is being loaded.
+ *
+ * NOTE: affects all touchpoints
+ */
+- (void)updateLevel:(int)level {
+    TPLog(@"updateLevel: %d", level);
+    [[TpDataStore sharedInstance] setDataWithValue:[NSNumber numberWithInt:level] forKey:kTPKeyLevel];
+}
+
+/*
+ * Should be called when an IAP purchase is done or if the user can gain VC in the game without purchasing it (in this case dollarAmount will be 0).
+ */
+- (void)updateVcPurchaseInfoForTouchpoint:(NSString*)touchpointName dollarAmount:(float)dollarAmount vcAmount:(int)vcAmount {
+    TPLog(@"updateVcPurchaseInfoForTouchpoint:%@ dollarAmount:%@ vcAmount:%@", touchpointName, [NSNumber numberWithFloat:dollarAmount], [NSNumber numberWithInt:vcAmount]);
     
-    TpOfferwallViewController *tpOfferwall = [[TpOfferwallViewController alloc] initWithVic:vic sid:sid];
+    NSMutableDictionary *vcPurchaseInfo = [[TpDataStore sharedInstance] dataValueForKey:kTPKeyVCPurchaseInfo];
+    
+    // if there is no any VC purchase information at all - initialize it with an empty dictionary
+    if (vcPurchaseInfo == nil) {
+        vcPurchaseInfo = [NSMutableDictionary dictionary];
+    }
+    
+    NSMutableDictionary *vcPurchaseInfoForTouchpoint = [vcPurchaseInfo objectForKey:touchpointName];
+    
+    if (vcPurchaseInfoForTouchpoint != nil) {
+        // add the passed values to current vales of "dollarAmount" and "vcAmount" for for the touchpoint
+        float newDollarAmount = [[vcPurchaseInfoForTouchpoint objectForKey:kTPKeyDollarAmount] floatValue] + dollarAmount;
+        int newVcAmount = [[vcPurchaseInfoForTouchpoint objectForKey:kTPKeyVCAmount] intValue] + vcAmount;
+        
+        [vcPurchaseInfoForTouchpoint setObject:[NSNumber numberWithFloat:newDollarAmount] forKey:kTPKeyDollarAmount];
+        [vcPurchaseInfoForTouchpoint setObject:[NSNumber numberWithInt:newVcAmount] forKey:kTPKeyVCAmount];
+    } else {
+        // we don't have any information for the touchpoint yet, so initialize it with the passed parameters
+        vcPurchaseInfoForTouchpoint = [NSMutableDictionary dictionaryWithObjectsAndKeys:
+                                       [NSNumber numberWithFloat:dollarAmount], kTPKeyDollarAmount,
+                                       [NSNumber numberWithInt:vcAmount], kTPKeyVCAmount,
+                                       nil];
+        [vcPurchaseInfo setObject:vcPurchaseInfoForTouchpoint forKey:touchpointName];
+    }
+
+    [[TpDataStore sharedInstance] setDataWithValue:vcPurchaseInfo forKey:kTPKeyVCPurchaseInfo];
+}
+
+/*
+ * Should be called whenever there's a VC activity (or right before the touchpoint is being loaded).
+ */
+- (void)updateVcBalanceForTouchpoint:(NSString*)touchpointName vcAmount:(int)vcAmount {
+    TPLog(@"updateVcBalanceForTouchpoint:%@ vcAmount:%@", touchpointName, [NSNumber numberWithInt:vcAmount]);
+
+    NSMutableDictionary *vcBalance = [[TpDataStore sharedInstance] dataValueForKey:kTPKeyVCBalance];
+    
+    // if there is no any VC balance information at all - initialize it with an empty dictionary
+    if (vcBalance == nil) {
+        vcBalance = [NSMutableDictionary dictionary];
+    }
+
+    int newVcAmount = 0;
+    
+    if ([vcBalance objectForKey:touchpointName] != nil) {
+        newVcAmount = [[vcBalance objectForKey:touchpointName] intValue] + vcAmount;
+    } else {
+        newVcAmount = vcAmount;
+    }
+
+    [vcBalance setObject:[NSNumber numberWithInt:newVcAmount] forKey:touchpointName];
+    
+    [[TpDataStore sharedInstance] setDataWithValue:vcBalance forKey:kTPKeyVCBalance];
+}
+
+#pragma mark - Offerwall
+
+- (void)openOfferwallForTouchpoint:(NSString *)touchpointName {
+    TPLog(@"openOfferwallForTouchpoint:%@", touchpointName);
+    _isShowingOfferwall = YES;
+    TpOfferwallViewController *tpOfferwall = [[TpOfferwallViewController alloc] initWithTouchpointName:touchpointName];
     tpOfferwall.delegate = self;
     
-    UIViewController * root = [UIApplication sharedApplication].keyWindow.rootViewController;
-    
-    [root presentModalViewController:tpOfferwall animated:YES];
+    UIViewController *root = [UIApplication sharedApplication].keyWindow.rootViewController;
+  
+    if ([root respondsToSelector:@selector(presentViewController:animated:completion:)]) {
+        [root presentViewController:tpOfferwall animated:YES completion:nil];
+    } else {
+        // if iOS version < 6 is used
+        [root presentModalViewController:tpOfferwall animated:YES];
+    }
 }
 
-- (void) openOfferwallWithVic:(NSString *)vicValue sid:(NSString *)sidValue {
-    [self setSid:sidValue];
-    [self registerVic:vicValue withTouchpoint:vicValue];
-    [self openOfferwallForTouchpoint:vicValue];
-}
-
-/* ************* Balance ************* */
+#pragma mark - Balance
 
 static NSThread* balanceQueryAndWithdrawThread;
 static NSMutableDictionary *tpBalances;
 
-- (void) add:(int)differentialBalance toBalanceWithVic:(NSString *)vic {
-    NSMutableDictionary *balances = [self getBalances];
+- (void)addDifferentialBalance:(int)differentialBalance toVic:(NSString *)vic {
+    NSMutableDictionary *balances = [self balances];
     NSNumber *existingBalance = [balances valueForKey:vic];
     if (nil == existingBalance) {
         existingBalance = [[NSNumber alloc] initWithInt:0];
     }
     existingBalance = [NSNumber numberWithInt:[existingBalance intValue] + differentialBalance];
     [balances setValue:existingBalance forKey:vic];
-    [self setDataWithValue:balances forKey:@"balances"];
+    [[TpDataStore sharedInstance] setDataWithValue:balances forKey:kTPKeyBalances];
 }
 
 int balanceApiErrorWait = 10;
-- (int) checkBalance {
-    NSDLog(@"checkBalance");
+- (int)checkBalance {
+    TPLogEnter;
     int minSecondsValid = -1;
-    NSMutableArray *vics = [self getVics];
+    NSMutableArray *vics = [self vics];
     for (NSString *vic in vics) {
-        TpBalance* tpBalanceObject = [tpBalances valueForKey:vic];
+        TpBalance *tpBalanceObject = [tpBalances valueForKey:vic];
         if (nil == tpBalanceObject) {
-            NSString *sid = [self getSid];
+            NSString *sid = [self sid];
             tpBalanceObject = [[TpBalance alloc] initWithVic:vic sid:sid];
             if (nil == tpBalanceObject) {
-                NSLog(@"TrialpayManager ERROR: could not allocate a TpBalance object for vic=%@", vic);
+                TPCustomerError(@"could not allocate a TpBalance object for vic={vic}", @"could not allocate a TpBalance object for vic=%@", vic);
                 balanceApiErrorWait *= 1.2;
                 continue; // try to work with other vics.
             }
@@ -226,16 +298,21 @@ int balanceApiErrorWait = 10;
             return balanceApiErrorWait;
         }
         
-        int differentialBalance = [[latestBalanceInfo objectForKey:@"balance"] intValue];
-        int secondsValid = [[latestBalanceInfo objectForKey:@"seconds_valid"] intValue];
+        int differentialBalance = [[latestBalanceInfo objectForKey:kTPKeyBalance] intValue];
+        int secondsValid = [[latestBalanceInfo objectForKey:kTPKeySecondsValid] intValue];
         
         if (differentialBalance > 0) {
             Boolean ackSuccess = [tpBalanceObject acknowledgeBalanceInfo: latestBalanceInfo];
             if (ackSuccess) {
-                [self add:differentialBalance toBalanceWithVic:vic];
-                if (delegate) {
-                    [delegate TrialpayManager:self handleMessage:@"balance_update"];
-                }
+                [self addDifferentialBalance:differentialBalance toVic:vic];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    if (_delegate) {
+                        [_delegate trialpayManager:(TrialpayManager*)self withAction:TPBalanceUpdateAction];
+                    }
+                    if (_balanceUpdateBlock) {
+                        _balanceUpdateBlock((TrialpayManager*)self);
+                    }
+                });
             }
         }
         if ((minSecondsValid < 0) || (minSecondsValid > secondsValid)) {
@@ -243,32 +320,42 @@ int balanceApiErrorWait = 10;
             balanceApiErrorWait = minSecondsValid;
         }
     }
-    if (minSecondsValid<0) return balanceApiErrorWait;
+    if (minSecondsValid < 0) return balanceApiErrorWait;
     return minSecondsValid;
 }
 
-- (void) balanceQueryAndWithdraw {
-    NSDLog(@"balanceQueryAndWithdraw");
-    
-    [balanceUpdateCondition lock];
-    while([[NSThread currentThread] isCancelled] == NO) {
-        int secondsValid = [self checkBalance];
-        if (secondsValid < 0) {
-            secondsValid = 10;
+- (void)balanceQueryAndWithdraw {
+    TPLogEnter;
+    @autoreleasepool {
+        int defaultSecondsValid = 10;
+        int secondsValid = defaultSecondsValid;// start with 5s
+        [_balanceUpdateCondition lock];
+        while([[NSThread currentThread] isCancelled] == NO) {
+            if (!_isShowingOfferwall) {
+                secondsValid = [self checkBalance];
+                if (secondsValid < 0) {
+                    secondsValid = defaultSecondsValid;
+                }
+            }
+            TPLog(@"balanceQueryAndWithdraw before wait for %d", secondsValid);
+            [_balanceUpdateCondition waitUntilDate:[NSDate dateWithTimeIntervalSinceNow:secondsValid]];
         }
-        NSDLog(@"balanceQueryAndWithdraw before wait for %d", secondsValid);
-        [balanceUpdateCondition waitUntilDate:[NSDate dateWithTimeIntervalSinceNow:secondsValid]];
+        [_balanceUpdateCondition unlock];
     }
-    [balanceUpdateCondition unlock];
 }
 
-- (void) initiateBalanceChecks {
-    NSDLog(@"initiateBalanceChecks");
+- (void)initiateBalanceChecks {
+    TPLogEnter;
     if (nil != balanceQueryAndWithdrawThread) {
         [balanceQueryAndWithdrawThread cancel];
     }
-    
-    balanceUpdateCondition = [[NSCondition alloc] init];
+    if (nil != _balanceUpdateCondition) {
+        [_balanceUpdateCondition lock];
+        [_balanceUpdateCondition signal];
+        [_balanceUpdateCondition unlock];
+    } else {
+        _balanceUpdateCondition = [[NSCondition alloc] init];
+    }
     balanceQueryAndWithdrawThread = [[NSThread alloc] initWithTarget:self
                                                             selector:@selector(balanceQueryAndWithdraw)
                                                               object:nil];
@@ -276,36 +363,94 @@ int balanceApiErrorWait = 10;
     [balanceQueryAndWithdrawThread start];  // Actually create the thread
 }
 
-- (int) withdrawBalanceForTouchpoint:(NSString *)touchpointName {
-    NSDLog(@"withdrawBalanceForTouchpoint:%@", touchpointName);
-    NSDictionary *touchpointNames = [self getTouchpointNames];
-    NSString *vic = [touchpointNames valueForKey:touchpointName];
+- (int)withdrawBalanceForTouchpoint:(NSString *)touchpointName {
+    TPLog(@"withdrawBalanceForTouchpoint:%@", touchpointName);
+    NSString *vic = [self vicForTouchpoint:touchpointName];
     if (nil == vic) {
-        NSLog(@"TrialpayManager: Could not find VIC for %@. Skipping offerwall.", touchpointName);
+        TPCustomerWarning(@"Could not find VIC for {vic}. Skipping offerwall.", @"Could not find VIC for %@. Skipping offerwall.", touchpointName);
         return 0;
     }
-    [balanceUpdateCondition lock];
-    NSMutableDictionary *balances = [self getBalances];
+    [_balanceUpdateCondition lock];
+    NSMutableDictionary *balances = [self balances];
     NSNumber *existingBalance = [balances valueForKey:vic];
     if (nil == existingBalance || 0 == [existingBalance intValue]) {
-        [balanceUpdateCondition unlock];
+        [_balanceUpdateCondition unlock];
         return 0;
     }
     
-    [balances setValue:0 forKey:vic];
-    [self setDataWithValue:balances forKey:@"balances"];
-    [balanceUpdateCondition unlock];
+    [balances setValue:[NSNumber numberWithInt:0] forKey:vic];
+    [[TpDataStore sharedInstance] setDataWithValue:balances forKey:kTPKeyBalances];
+    [_balanceUpdateCondition unlock];
     return [existingBalance intValue];
 }
 
-/* ************* Delegate ************* */
+/* ************* Custom Params ************* */
 
-- (void) tpOfferwallViewController:(TpOfferwallViewController *)tpOfferwallViewController close:(id)sender {
-    // the offerwall container just got closed. wake up the balance check
-    [balanceUpdateCondition signal];
-    if (delegate) {
-        [delegate TrialpayManager:self handleMessage:@"offerwall_close"];
+NSMutableDictionary *customParams = nil;
+
+- (void)setCustomParamValue:(NSString *)paramValue forName:(NSString *)paramName {
+    // make sure that the parameter name is set.
+    if (paramName == nil || [paramName isEqualToString:@""]) {
+        TPLog(@"Cannot set a parameter without a parameter name. Skips.");
+        return;
     }
+    // create the custom param dictionary
+    if (customParams == nil) {
+        customParams = [[NSMutableDictionary alloc] init];
+    }
+    // if the value is nil, store an empty string
+    if (paramValue == nil) {
+        paramValue = @"";
+    }
+    // store value for given name
+    [customParams setValue:paramValue forKey:paramName];
+}
+
+- (void)clearCustomParamWithName:(NSString *)paramName {
+    // avoid errors
+    if (paramName == nil) {
+        return;
+    }
+    // remove value from map
+    [customParams removeObjectForKey:paramName];
+}
+
+- (NSDictionary *)consumeCustomParams:(BOOL)clear {
+    NSDictionary *result = customParams;
+    if (clear) {
+        customParams = nil;
+    }
+    return result;
+}
+
+
+#pragma mark - Delegate
+
+// allow response by blocks
+- (void)registerVic:(NSString *)vic withTouchpoint:(NSString *)touchpointName onOfferwallClose:(TPDelegateBlock)onOfferwallClose onBalanceUpdate:(TPDelegateBlock)onBalanceUpdate {
+    [self registerVic:vic withTouchpoint:touchpointName];
+    self.balanceUpdateBlock = onBalanceUpdate;
+    self.offerwallCloseBlock = onOfferwallClose;
+}
+
+- (void)tpOfferwallViewController:(TpOfferwallViewController *)tpOfferwallViewController close:(id)sender {
+    // the offerwall container just got closed. wake up the balance check
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (_delegate) {
+            [_delegate trialpayManager:(TrialpayManager*)self withAction:TPOfferwallCloseAction];
+        }
+        if (_offerwallCloseBlock) {
+            _offerwallCloseBlock((TrialpayManager*)self);
+        }
+    });
+
+    // wait for the navigation animation ~ 300ms
+    double delayInSeconds = 0.4;
+    dispatch_time_t popTime = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delayInSeconds * NSEC_PER_SEC));
+    dispatch_after(popTime, dispatch_get_main_queue(), ^(void){
+        _isShowingOfferwall = NO;
+        [_balanceUpdateCondition signal];
+    });
 }
 
 @end

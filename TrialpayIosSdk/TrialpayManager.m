@@ -1,26 +1,26 @@
-#import "TrialpayManager.h"
+//  Copyright (C) 2013 TrialPay, Inc All Rights Reserved
+//
+//  TrialpayManager.m
+//
 
-// Create NSDLog - a debug call available on debug mode only
-#ifdef DEBUG
-#define NSDLog(FORMAT, ...) fprintf(stderr,"[TrialpayManager] %s\n", [[NSString stringWithFormat:FORMAT, ##__VA_ARGS__] UTF8String]);
-#else
-#define NSDLog(...)
-#endif
+#import "TrialpayManager.h"
 
 @implementation TrialpayManager
 
-/* ************* getInstance ************* */
-+ (BaseTrialpayManager *)getInstance {
-    NSDLog(@"getInstance");
-    if (![super getInstance]) {
-        [super setInstance:[[TrialpayManager alloc] init]];
+static TrialpayManager *__trialpayManagerInstance;
+
+#pragma mark - getInstance
++ (TrialpayManager *)getInstance {
+    TPLogEnter;
+    if (!__trialpayManagerInstance) {
+        __trialpayManagerInstance = [[TrialpayManager alloc] init];
     }
-    return [super getInstance];
+    return __trialpayManagerInstance;
 }
 
-/* ************* Get SDK Version ************* */
-- (NSString*) getSdkVer {
-    return [NSString stringWithFormat:@"sdk.%@", [super getSdkVer]];
+#pragma mark - Get SDK Version
++ (NSString*) sdkVersion {
+    return [NSString stringWithFormat:@"base.%@", [super sdkVersion]];
 }
 
 

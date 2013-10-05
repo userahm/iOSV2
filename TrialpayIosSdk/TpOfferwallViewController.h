@@ -6,7 +6,6 @@
 //
 
 #import <UIKit/UIKit.h>
-#import "TpWebView.h"
 
 @class TpOfferwallViewController;
 
@@ -14,19 +13,16 @@
 - (void)tpOfferwallViewController:(TpOfferwallViewController *)tpOfferwallViewController close:(id)sender;
 @end
 
-#import "BaseTrialpayManager.h"
-
+#import "TpWebView.h"
 
 @interface TpOfferwallViewController : UIViewController <TpWebViewDelegate>
 
-- (id)initWithVic:(NSString *)vicValue sid:(NSString *)sidValue;
+- (id)initWithTouchpointName:(NSString *)touchpointName;
 
-@property (strong, nonatomic) NSString *offerwallUrl;
-@property (strong, nonatomic) NSString *vic;
-@property (strong, nonatomic) NSString *sid;
+@property (strong, nonatomic, readonly) NSString *touchpointName;
 
 @property (strong, nonatomic) id<TpOfferwallViewControllerDelegate> delegate;
 
-@property (strong, nonatomic) IBOutlet TpWebView *offerwallContainer;
+@property (strong, nonatomic) IBOutlet TpWebView *tpWebView;
 
 @end
