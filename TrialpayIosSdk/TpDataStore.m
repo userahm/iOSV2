@@ -1,14 +1,12 @@
 //
 // Created by Daniel Togni on 9/27/13.
-// Copyright (c) 2013 TrialPay Inc. All rights reserved.
-//
-// To change the template use AppCode | Preferences | File Templates.
+// Copyright (c) 2013 TrialPay, Inc. All Rights Reserved.
 //
 
 
 #import "BaseTrialpayManager.h"
 #import "TpDataStore.h"
-
+#import "TpArcSupport.h"
 
 @implementation TpDataStore {
     NSMutableDictionary *_trialpayManagerDictionary;
@@ -24,6 +22,11 @@ static TpDataStore *__trialpayDataStoreSingleton;
     __trialpayDataStoreSingleton = [[TpDataStore alloc] init];
     __initialized = YES;
     return __trialpayDataStoreSingleton;
+}
+
+- (void)dealloc {
+    [_trialpayManagerDictionary TP_RELEASE];
+    [super TP_DEALLOC];
 }
 
 #pragma mark - Handling dictionary in TrialpayManager.plist

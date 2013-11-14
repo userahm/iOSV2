@@ -1,6 +1,8 @@
-//  Copyright (C) 2013 TrialPay, Inc All Rights Reserved
 //
 //  TPConstants.h
+//
+//  Created by Trialpay Inc.
+//  Copyright (c) 2013 TrialPay, Inc. All Rights Reserved.
 //
 
 // Disable exceptions unless defined

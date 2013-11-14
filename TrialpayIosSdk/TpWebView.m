@@ -1,26 +1,34 @@
 //
 //  TpWebView.m
 //
-//  Created by Trialpay
+//  Created by Yoav Yaari.
 //  Copyright (c) 2013 Yoav Yaari. All rights reserved.
 //
 
 #import "TpWebView.h"
-#import "TpUtils.h"
 #import "TpUrlManager.h"
+#import "TpWebToolbar.h"
+#import "BaseTrialpayManager.h"
+#import "TpArcSupport.h"
 
 @interface TpWebView()
 @property (strong) NSString *initialUrl;
 @property (strong) UIWebView *webViewContainer;
 @property (strong) UIBarButtonItem *flexibleSpaceArea;
 @property (strong) UIActivityIndicatorView *loadingIndicator;
+@property (nonatomic, copy) NSString *currentTouchpointName;
+@property (nonatomic, strong) NSURLRequest *currentRequest;
+
+// Set up to use it for opening external apps. URL to a target is passed, use its scheme to define the app type.
+@property (nonatomic, copy) void(^externalAppOpener)(NSURL *);
+
 @end
 
 @implementation TpWebView
 
 /*
  * Loads the offerwall using the given frame size.
- * This is currently being overriden by -buildViewWithWidth:height:
+ * This is currently being overriden by -buildViewWithToolbarAndWidth:height:
  */
 - (id)initWithFrame:(CGRect)frame {
     TPLogEnter;
@@ -32,124 +40,158 @@
     return self;
 }
 
+- (void)dealloc {
+    // break self referencing cycle so that ARC can claim memory
+    TP_ARC_RELEASE(delegate);
+    // stop delegates and webviews, if needed
+    [self stopWebViews];
+
+    // help ARC claim the memory faster
+    TP_ARC_RELEASE(offerContainer);
+    TP_ARC_RELEASE(offerwallContainer);
+    TP_ARC_RELEASE(webViewContainer);
+    TP_ARC_RELEASE(mainView);
+    TP_ARC_RELEASE(toolbar);
+
+    TP_ARC_RELEASE(webToolbar);
+    TP_ARC_RELEASE(backButton);
+    TP_ARC_RELEASE(flexibleSpaceArea);
+    TP_ARC_RELEASE(doneButton);
+    TP_ARC_RELEASE(loadingIndicator);
+    TP_ARC_RELEASE(initialUrl);
+
+    [super TP_DEALLOC];
+}
+
 /*
  * Sets the given offerwallUrl as the initialUrl for the offerwallContainer.
  * The url is loaded in -layoutSubviews
  */
-- (void)loadRequest:(NSString*)offerwallUrl {
+- (void)loadRequest:(NSString*)urlString {
     TPLogEnter;
-    [self setInitialUrl:[NSString stringWithFormat:@"%@&tp_base_page=1",offerwallUrl]];
-    if (nil != _offerwallContainer) {
-        NSURL *url = [NSURL URLWithString:_initialUrl];
+    [self setInitialUrl:[NSString stringWithFormat:@"%@&tp_base_page=1", urlString]];
+    if (nil != self.offerwallContainer) {
+        NSURL *url = [NSURL URLWithString:self.initialUrl];
         NSURLRequest* request = [NSURLRequest requestWithURL:url];
-        [_offerwallContainer loadRequest:request];
+        [self.offerwallContainer loadRequest:request];
     }
 }
 
 #pragma mark - pragmatically build views
+
+- (UIView *)buildWebToolbarWithWidth:(CGFloat)width andHeight:(CGFloat)height {
+    float toolbarHeight = 44.0;
+    self.webToolbar = [[[TpWebToolbar alloc] initWithFrame:CGRectMake(0.0, 0.0, width, toolbarHeight)] TP_AUTORELEASE];
+    self.webToolbar.tpDelegate = self;
+    return self.webToolbar;
+}
+
 /*
  * Setting up the view structure with code.
  * We do not use XIBs in order to reduce plugin integration complexity
  */
-- (UIView *)buildViewWithWidth:(CGFloat)width height:(CGFloat)height {
+- (UIView *)buildToolbarWithWidth:(CGFloat)width andHeight:(CGFloat)height {
     TPLog(@"buildViewWithWidth:%f height:%f", width, height);
     
-    UIApplication *application = [UIApplication sharedApplication];
-    float statusBarHeight = MIN(application.statusBarFrame.size.width, application.statusBarFrame.size.height);
     float toolbarHeight = 44.0;
     
     // Build toolbar
-    _toolbar = [[UIToolbar alloc] initWithFrame:CGRectMake(0.0, 0.0, width, toolbarHeight)];
-    _toolbar.alpha = 1.000;
-    _toolbar.autoresizesSubviews = YES;
-    _toolbar.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleBottomMargin;
-    _toolbar.barStyle = UIBarStyleDefault;
-    _toolbar.clearsContextBeforeDrawing = NO;
-    _toolbar.clipsToBounds = NO;
-    _toolbar.contentMode = UIViewContentModeScaleToFill;
-    _toolbar.frame = CGRectMake(0.0, 0.0, width, 44.0);
-    _toolbar.hidden = NO;
-    _toolbar.multipleTouchEnabled = NO;
-    _toolbar.opaque = NO;
-    _toolbar.tag = 0;
-    _toolbar.userInteractionEnabled = YES;
+    self.toolbar = [[[UIToolbar alloc] initWithFrame:CGRectMake(0.0, 0.0, width, toolbarHeight)] TP_AUTORELEASE];
+    self.toolbar.alpha = 1.000;
+    self.toolbar.autoresizesSubviews = YES;
+    self.toolbar.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleBottomMargin;
+    self.toolbar.barStyle = UIBarStyleDefault;
+    self.toolbar.clearsContextBeforeDrawing = NO;
+    self.toolbar.clipsToBounds = NO;
+    self.toolbar.contentMode = UIViewContentModeScaleToFill;
+    self.toolbar.frame = CGRectMake(0.0, 0.0, width, 44.0);
+    self.toolbar.hidden = NO;
+    self.toolbar.multipleTouchEnabled = NO;
+    self.toolbar.opaque = NO;
+    self.toolbar.tag = 0;
+    self.toolbar.userInteractionEnabled = YES;
     
-    _backButton = [[UIBarButtonItem alloc] init];
-    _backButton.imageInsets = UIEdgeInsetsZero;
-    _backButton.style = UIBarButtonItemStyleBordered;
-    _backButton.tag = 0;
-    _backButton.title = @"Back";
-    _backButton.width = 0.000;
-    _backButton.action = @selector(backButtonPushed:);
+    self.backButton = [[[UIBarButtonItem alloc] init] TP_AUTORELEASE];
+    self.backButton.imageInsets = UIEdgeInsetsZero;
+    self.backButton.style = UIBarButtonItemStyleBordered;
+    self.backButton.tag = 0;
+    self.backButton.title = @"Back";
+    self.backButton.width = 0.000;
+    self.backButton.action = @selector(backButtonPushed:);
     
-    _flexibleSpaceArea = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
-    _flexibleSpaceArea.enabled = YES;
-    _flexibleSpaceArea.imageInsets = UIEdgeInsetsZero;
-    _flexibleSpaceArea.style = UIBarButtonItemStylePlain;
-    _flexibleSpaceArea.tag = 0;
-    _flexibleSpaceArea.width = 0.000;
+    self.flexibleSpaceArea = [[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil] TP_AUTORELEASE];
+    self.flexibleSpaceArea.enabled = YES;
+    self.flexibleSpaceArea.imageInsets = UIEdgeInsetsZero;
+    self.flexibleSpaceArea.style = UIBarButtonItemStylePlain;
+    self.flexibleSpaceArea.tag = 0;
+    self.flexibleSpaceArea.width = 0.000;
     
-    _doneButton = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:nil action:nil];
-    _doneButton.enabled = YES;
-    _doneButton.imageInsets = UIEdgeInsetsZero;
-    _doneButton.style = UIBarButtonItemStyleBordered;
-    _doneButton.tag = 0;
-    _doneButton.width = 0.000;
-    _doneButton.action = @selector(doneButtonPushed:);
-    
-    _toolbar.items = [NSArray arrayWithObjects:_flexibleSpaceArea, _doneButton, nil];
-    
-    
-    
+    self.doneButton = [[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:nil action:nil] TP_AUTORELEASE];
+    self.doneButton.enabled = YES;
+    self.doneButton.imageInsets = UIEdgeInsetsZero;
+    self.doneButton.style = UIBarButtonItemStyleBordered;
+    self.doneButton.tag = 0;
+    self.doneButton.width = 0.000;
+    self.doneButton.action = @selector(doneButtonPushed:);
+    return self.toolbar;
+}
+
+- (UIView *)buildViewWithToolbarAndWidth:(CGFloat)width height:(CGFloat)height {
     // Build offerwallContainer
-    _offerwallContainer = [[UIWebView alloc] initWithFrame:CGRectMake(0.0, toolbarHeight, width, height-(toolbarHeight+statusBarHeight))];
+    UIApplication *application = [UIApplication sharedApplication];
+    float statusBarHeight = MIN(application.statusBarFrame.size.width, application.statusBarFrame.size.height);
+    float toolbarHeight = 44.0;
+
+    self.offerwallContainer = [[[UIWebView alloc] initWithFrame:CGRectMake(0.0, toolbarHeight, width, height-(toolbarHeight+statusBarHeight))] TP_AUTORELEASE];
     
-    _offerwallContainer.alpha = 1.000;
-    _offerwallContainer.autoresizesSubviews = YES;
-    _offerwallContainer.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    _offerwallContainer.backgroundColor = [UIColor colorWithRed:1.000 green:1.000 blue:1.000 alpha:1.000];
-    _offerwallContainer.clearsContextBeforeDrawing = YES;
-    _offerwallContainer.clipsToBounds = NO;
-    _offerwallContainer.contentMode = UIViewContentModeScaleToFill;
-    _offerwallContainer.hidden = NO;
-    _offerwallContainer.multipleTouchEnabled = NO;
-    _offerwallContainer.opaque = YES;
-    _offerwallContainer.scalesPageToFit = NO;
-    _offerwallContainer.tag = 0;
-    _offerwallContainer.userInteractionEnabled = YES;
-    _offerwallContainer.delegate = self;
+    self.offerwallContainer.alpha = 1.000;
+    self.offerwallContainer.autoresizesSubviews = YES;
+    self.offerwallContainer.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    self.offerwallContainer.backgroundColor = [UIColor colorWithRed:1.000 green:1.000 blue:1.000 alpha:1.000];
+    self.offerwallContainer.clearsContextBeforeDrawing = YES;
+    self.offerwallContainer.clipsToBounds = NO;
+    self.offerwallContainer.contentMode = UIViewContentModeScaleToFill;
+    self.offerwallContainer.hidden = NO;
+    self.offerwallContainer.multipleTouchEnabled = NO;
+    self.offerwallContainer.opaque = YES;
+    self.offerwallContainer.scalesPageToFit = NO;
+    self.offerwallContainer.tag = 0;
+    self.offerwallContainer.userInteractionEnabled = YES;
+    self.offerwallContainer.delegate = self;
     
-    [[_offerwallContainer scrollView] setBounces:NO];
-    [_offerwallContainer setAllowsInlineMediaPlayback:YES];
-    [_offerwallContainer setMediaPlaybackRequiresUserAction:NO];
-    [_offerwallContainer setScalesPageToFit:YES];
+    [[self.offerwallContainer scrollView] setBounces:YES];
+    [self.offerwallContainer setAllowsInlineMediaPlayback:YES];
+    [self.offerwallContainer setMediaPlaybackRequiresUserAction:NO];
+    [self.offerwallContainer setScalesPageToFit:YES];
     
     // Build main view (container)
-    _mainView = [[UIView alloc] initWithFrame:CGRectMake(0.0, statusBarHeight, width, height-statusBarHeight)];
-    _mainView.alpha = 1.000;
-    _mainView.autoresizesSubviews = YES;
-    _mainView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    _mainView.backgroundColor = [UIColor colorWithWhite:1.000 alpha:1.000];
-    _mainView.clearsContextBeforeDrawing = YES;
-    _mainView.clipsToBounds = NO;
-    _mainView.contentMode = UIViewContentModeScaleToFill;
-    _mainView.hidden = NO;
-    _mainView.multipleTouchEnabled = NO;
-    _mainView.opaque = YES;
-    _mainView.tag = 0;
-    _mainView.userInteractionEnabled = YES;
+    self.mainView = [[[UIView alloc] initWithFrame:CGRectMake(0.0, statusBarHeight, width, height-statusBarHeight)] TP_AUTORELEASE];
+    self.mainView.alpha = 1.000;
+    self.mainView.autoresizesSubviews = YES;
+    self.mainView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    self.mainView.backgroundColor = [UIColor colorWithWhite:1.000 alpha:1.000];
+    self.mainView.clearsContextBeforeDrawing = YES;
+    self.mainView.clipsToBounds = NO;
+    self.mainView.contentMode = UIViewContentModeScaleToFill;
+    self.mainView.hidden = NO;
+    self.mainView.multipleTouchEnabled = NO;
+    self.mainView.opaque = YES;
+    self.mainView.tag = 0;
+    self.mainView.userInteractionEnabled = YES;
+
+//    [self.mainView addSubview:[self buildWebToolbarWithWidth:width andHeight:height]];
+    [self.mainView addSubview:[self buildToolbarWithWidth:width andHeight:height]];
+    [self setupToolbarUsingBack:NO];
+    [self.mainView addSubview:self.offerwallContainer];
     
-    [_mainView addSubview:_toolbar];
-    [_mainView addSubview:_offerwallContainer];
-    
-    return _mainView;
+    return self.mainView;
 }
 
 /*
  * Returns the "name" of the UIWebView element for logging purposes
  */
 - (NSString *)getWebViewName:(UIWebView *)webView {
-    return [webView isEqual:_offerwallContainer] ? @"offerwallContainer" : @"offerContainer";
+    return [webView isEqual:self.offerwallContainer] ? @"offerwallContainer" : @"offerContainer";
 }
 
 /*
@@ -163,7 +205,7 @@
     UIApplication *application = [UIApplication sharedApplication];
     float statusBarHeight = MIN(application.statusBarFrame.size.width, application.statusBarFrame.size.height);
     
-    if (_mainView == nil) {
+    if (self.mainView == nil) {
         CGRect screenRect =  [[UIScreen mainScreen] bounds];
         // we need to get the screen size with the right orientation which means to get the height and width
         // and then to switch their positions if (we got a landscape orientation)XOR(we need landscape orientation)
@@ -189,16 +231,16 @@
             height = temp;
         }
         TPLog(@"height: %f, width: %f", height, width);
+
+        [self buildViewWithToolbarAndWidth:width height:height];
+        [self addSubview:self.mainView];
         
-        [self buildViewWithWidth:width height:height];
-        [self addSubview:_mainView];
-        
-        if (_initialUrl) {
-            NSURL* url = [NSURL URLWithString:_initialUrl];
+        if (self.initialUrl) {
+            NSURL* url = [NSURL URLWithString:self.initialUrl];
             NSURLRequest* request = [NSURLRequest requestWithURL:url];
-            [_offerwallContainer loadRequest:request];
+            [self.offerwallContainer loadRequest:request];
             
-            _webViewContainer = _offerwallContainer;
+            self.webViewContainer = self.offerwallContainer;
         }
 
         // ViewController::edgesForExtendedLayout is not working, so we will need to move the start y on ios7, possible reasons:
@@ -213,7 +255,7 @@
             self.backgroundColor = [UIColor whiteColor];
         }
 
-        _mainView.frame = CGRectMake(0, startY, width, height-statusBarHeight);
+        self.mainView.frame = CGRectMake(0, startY, width, height-statusBarHeight);
     }
 }
 
@@ -221,63 +263,79 @@
 - (void) loadOfferContainerWithRequest:(NSURLRequest *)request {
     TPLog(@"loadOfferContainerWithRequest: %@", request.URL.absoluteString);
     
-    _offerContainer = [[UIWebView alloc] initWithFrame:_offerwallContainer.frame];
+    self.offerContainer = [[[UIWebView alloc] initWithFrame:self.offerwallContainer.frame] TP_AUTORELEASE];
     
-    _offerContainer.alpha = 1.000;
-    _offerContainer.autoresizesSubviews = YES;
-    _offerContainer.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    _offerContainer.backgroundColor = [UIColor colorWithRed:1.000 green:1.000 blue:1.000 alpha:1.000];
-    _offerContainer.clearsContextBeforeDrawing = YES;
-    _offerContainer.clipsToBounds = NO;
-    _offerContainer.contentMode = UIViewContentModeScaleToFill;
-    _offerContainer.hidden = NO;
-    _offerContainer.multipleTouchEnabled = NO;
-    _offerContainer.opaque = YES;
-    _offerContainer.scalesPageToFit = NO;
-    _offerContainer.tag = 0;
-    _offerContainer.userInteractionEnabled = YES;
-    _offerContainer.delegate = self;
+    self.offerContainer.alpha = 1.000;
+    self.offerContainer.autoresizesSubviews = YES;
+    self.offerContainer.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    self.offerContainer.backgroundColor = [UIColor colorWithRed:1.000 green:1.000 blue:1.000 alpha:1.000];
+    self.offerContainer.clearsContextBeforeDrawing = YES;
+    self.offerContainer.clipsToBounds = NO;
+    self.offerContainer.contentMode = UIViewContentModeScaleToFill;
+    self.offerContainer.hidden = NO;
+    self.offerContainer.multipleTouchEnabled = NO;
+    self.offerContainer.opaque = YES;
+    self.offerContainer.scalesPageToFit = NO;
+    self.offerContainer.tag = 0;
+    self.offerContainer.userInteractionEnabled = YES;
+    self.offerContainer.delegate = self;
     
-    [_offerContainer setAllowsInlineMediaPlayback:YES];
-    [_offerContainer setMediaPlaybackRequiresUserAction:NO];
-    [_offerContainer setScalesPageToFit:YES];
+    [self.offerContainer setAllowsInlineMediaPlayback:YES];
+    [self.offerContainer setMediaPlaybackRequiresUserAction:NO];
+    [self.offerContainer setScalesPageToFit:YES];
     
-    [_offerContainer loadRequest:request];
+    [self.offerContainer loadRequest:request];
     
-    [UIView transitionWithView:_mainView
+    [UIView transitionWithView:self.mainView
                       duration:0.5
                        options:UIViewAnimationOptionTransitionCrossDissolve
-                    animations:^ { [_mainView addSubview:_offerContainer]; }
+                    animations:^ { [self.mainView addSubview:self.offerContainer]; }
                     completion:nil];
     
-    _webViewContainer = _offerContainer;
-    _toolbar.items = [NSArray arrayWithObjects:_backButton, _flexibleSpaceArea, _doneButton, nil];
+    self.webViewContainer = self.offerContainer;
+    [self setupToolbarUsingBack:YES];
+}
+
+- (void)setupToolbarUsingBack:(BOOL)useBack {
+    if (self.toolbar) {
+        if (useBack) {
+            self.toolbar.items = [NSArray arrayWithObjects:self.backButton, self.flexibleSpaceArea, self.doneButton, nil];
+        } else {
+            self.toolbar.items = [NSArray arrayWithObjects:self.flexibleSpaceArea, self.doneButton, nil];
+        }
+    } else {
+        if (useBack) {
+            [self.webToolbar enableBackButton];
+        } else {
+            [self.webToolbar disableBackButton];
+        }
+    }
 }
 
 - (void) unloadOfferContainer {
     TPLog(@"unloadOfferContainer");
-    _webViewContainer = _offerwallContainer;
-    [_offerContainer removeFromSuperview];
-    _offerContainer = nil;
-    _toolbar.items = [NSArray arrayWithObjects:_flexibleSpaceArea, _doneButton, nil];
+    self.webViewContainer = self.offerwallContainer;
+    [self.offerContainer removeFromSuperview];
+    self.offerContainer = nil;
+    [self setupToolbarUsingBack:NO];
 }
 
 #pragma mark - Indicator on Navigation Bar
 - (void) showLoadingIndicator {
-    if (nil == _loadingIndicator) {
-        CGRect indicatorBounds = CGRectMake(_offerwallContainer.frame.size.width/4, 12, _offerwallContainer.frame.size.width/2, 24);
-        _loadingIndicator = [[UIActivityIndicatorView alloc] initWithFrame:indicatorBounds];
-        _loadingIndicator.activityIndicatorViewStyle = UIActivityIndicatorViewStyleWhite;
-        _loadingIndicator.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-        [_loadingIndicator startAnimating];
-        [_mainView addSubview:_loadingIndicator];
+    if (nil == self.loadingIndicator) {
+        CGRect indicatorBounds = CGRectMake(self.offerwallContainer.frame.size.width/4, 12, self.offerwallContainer.frame.size.width/2, 24);
+        self.loadingIndicator = [[[UIActivityIndicatorView alloc] initWithFrame:indicatorBounds] TP_AUTORELEASE];
+        self.loadingIndicator.activityIndicatorViewStyle = UIActivityIndicatorViewStyleWhite;
+        self.loadingIndicator.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+        [self.loadingIndicator startAnimating];
+        [self.mainView addSubview:self.loadingIndicator];
     }
 }
 
 - (void) hideLoadingIndicator {
-    if (nil != _loadingIndicator) {
-        [_loadingIndicator removeFromSuperview];
-        _loadingIndicator = nil;
+    if (nil != self.loadingIndicator) {
+        [self.loadingIndicator removeFromSuperview];
+        self.loadingIndicator = nil;
     }
 }
 
@@ -285,16 +343,24 @@
 /* Part of Trialpay's integration instructions
  */
 - (BOOL)webView:(UIWebView *)webView shouldStartLoadWithRequest:(NSURLRequest *)request navigationType:(UIWebViewNavigationType)navigationType {
+    self.currentRequest = request;
     TPLog(@"webView:%@ shouldStartLoadWithRequest:%@ navigationType:%d", [self getWebViewName:webView], [[request URL] absoluteString], navigationType);
     
-    if ([webView isEqual:_offerwallContainer]) {
+    if ([webView isEqual:self.offerwallContainer]) {
         if ([request.URL.scheme hasPrefix:@"http"] || [request.URL.scheme hasPrefix:@"https"]) {
             NSArray *tpHosts = [NSArray arrayWithObjects:@"trialpay.com", @"trialpay.net", @"tp-cdn.com", nil];
+            
             NSString *host = request.URL.host;
-            if ([host hasPrefix:@"www."]) {
-                host = [host substringFromIndex:4];
+
+            BOOL isTPHost = NO;
+            for (NSString *tpHost in tpHosts) {
+                if ([host rangeOfString:tpHost].location != NSNotFound) {
+                    isTPHost = YES;
+                    break;
+                }
             }
-            if ([tpHosts containsObject:host]) {
+            
+            if (isTPHost) {
                 // when loading a new page, start by checking if it is a tp_base_page. These pages should be loaded in the offerwallContainer
                 if ([request.URL.absoluteString rangeOfString:@"tp_base_page=1"].location != NSNotFound) {
                     return YES;
@@ -306,7 +372,7 @@
                 return YES;
             }
         }
-    } else if ([webView isEqual:_offerContainer]) {
+    } else if ([webView isEqual:self.offerContainer]) {
         // we need to see if the URL has a special protocol. if not, load the page in the offerContainer
         if ([request.URL.scheme hasPrefix:@"http"] || [request.URL.scheme hasPrefix:@"https"]) {
             return YES;
@@ -321,7 +387,14 @@
     if ([request.URL.scheme hasPrefix:@"tpbow"]) {
         url = [NSURL URLWithString:[request.URL.absoluteString substringFromIndex:5]];
     }
-    [[UIApplication sharedApplication] openURL: url];
+    if ([self externalAppOpener] == nil) {
+        if ([[UIApplication sharedApplication] canOpenURL:url]) {
+            [[UIApplication sharedApplication] openURL:url];
+            return NO;
+        }
+    } else {
+        [self externalAppOpener](url);
+    }
     return NO;
 }
 
@@ -336,12 +409,20 @@
 }
 
 - (void)webView:(UIWebView *)webView didFailLoadWithError:(NSError *)error {
+    if ([error code] == NSURLErrorCancelled) {
+        return;
+    }
+
+    // Ignore/suppress "Fame Load Interrupted" errors. Seen after app store links.
+    // couldnt find a enum code for 102
+    if (error.code == 102 && [error.domain isEqual:@"WebKitErrorDomain"]) return;
+
     //Log this error even when not in DEBUG mode
     TPCustomerError(@"webView:didFailLoadWithError:", @"webView:%@ didFailLoadWithError:%@", [self getWebViewName:webView], [error description]);
     [self hideLoadingIndicator];
     switch ([error code]) {
-        case -1009:
-        case -1001:
+        case NSURLErrorNotConnectedToInternet:
+        case NSURLErrorTimedOut:
         {
             // The Internet connection appears to be offline
             UIAlertView *alert = [[UIAlertView alloc] initWithTitle:NSLocalizedString(@"There seems to be a problem with your internet connection",@"There seems to be a problem with your internet connection")
@@ -351,9 +432,10 @@
                                                   otherButtonTitles:NSLocalizedString(@"Reload",@"Reload"), NSLocalizedString(@"Close",@"Close"), nil];
             [alert setTag:1];
             [alert show];
+            [alert TP_AUTORELEASE];
             break;
         }
-
+        default: break;
     }
     
 }
@@ -363,10 +445,10 @@
 - (IBAction)doneButtonPushed:(id)sender {
     TPLogEnter;
     [self hideLoadingIndicator];
-    if ([_webViewContainer isEqual:_offerContainer]) {
+    if ([self.webViewContainer isEqual:self.offerContainer]) {
         [self unloadOfferContainer];
     } else {
-        [_delegate tpWebView:self donePushed:sender];
+        [self.delegate tpWebView:self donePushed:sender];
     }
 }
 
@@ -374,9 +456,9 @@
 - (IBAction)backButtonPushed:(id)sender {
     TPLogEnter;
     [self hideLoadingIndicator];
-    if (_webViewContainer.canGoBack) {
-        [_webViewContainer goBack];
-    } else if ([_webViewContainer isEqual:_offerContainer]) {
+    if (self.webViewContainer.canGoBack) {
+        [self.webViewContainer goBack];
+    } else if ([self.webViewContainer isEqual:self.offerContainer]) {
         [self unloadOfferContainer];
     }
 }
@@ -389,13 +471,13 @@
             switch (buttonIndex) {
                 case 0: //Reload
                 {
-                    if (_webViewContainer.canGoBack) {
-                        [_webViewContainer reload];
+                    if (self.webViewContainer.canGoBack) {
+                        [self.webViewContainer reload];
                     } else {
-                        if ([_webViewContainer isEqual:_offerwallContainer] ) {
-                            NSURL *url = [NSURL URLWithString:_initialUrl];
+                        if ([self.webViewContainer isEqual:self.offerwallContainer] ) {
+                            NSURL *url = [NSURL URLWithString:self.initialUrl];
                             NSURLRequest* request = [NSURLRequest requestWithURL:url];
-                            [_offerwallContainer loadRequest:request];
+                            [self.offerwallContainer loadRequest:request];
                         } else {
                             [self doneButtonPushed:nil]; //TODO: this needs to be fixed - reload does not work for the initial URL
                         }
@@ -407,13 +489,17 @@
                     [self doneButtonPushed:nil];
                     break;
                 }
+                default: break;
             }
             break;
         }
+        default: break;
     }
 }
 
 - (BOOL)loadOfferwallForTouchpoint:(NSString *)touchpointName {
+    TPLogEnter;
+    self.currentTouchpointName = touchpointName;
     NSString *url = [[TpUrlManager sharedInstance] offerwallUrlForTouchpoint:touchpointName];
     TPLog(@"Url: %@", url);
     if (url == nil) {
@@ -423,6 +509,109 @@
     [self unloadOfferContainer];
     [self loadRequest:url];
     return true;
+}
+
+- (BOOL)loadDealspotForTouchpoint:(NSString *)touchpointName withUrl:(NSString *)dealspotUrl {
+    TPLogEnter;
+    self.currentTouchpointName = touchpointName;
+    TPLog(@"Url: %@", dealspotUrl);
+    if (dealspotUrl == nil) {
+        TPCustomerLog(@"Unable to get dealspot URL fo {url}", @"Unable to get dealspot URL fo %@", touchpointName);
+        return false;
+    }
+    [self unloadOfferContainer];
+    [self loadRequest:dealspotUrl];
+    return true;
+}
+
+- (void)goToOfferwall {
+    [self unloadOfferContainer];
+}
+
+// Respond to tp://close - call the close offerwall functionality
+- (void) navClose:(NSURL*)url {
+    [self.delegate tpWebView:self donePushed:self];
+}
+
+//tp://up - call the "up" functionality - if the user is in the offer scope, go back to the offerwall, otherwise close the offerwall
+- (void) navUp:(NSURL*)url {
+    [self hideLoadingIndicator];
+    // go back, go up, than close
+    if (self.webViewContainer.canGoBack) {
+        [self.webViewContainer goBack];
+    } else if ([self.webViewContainer isEqual:self.offerContainer]) {
+        [self unloadOfferContainer];
+    } else {
+        [self.delegate tpWebView:self donePushed:self];
+    }
+// OR Should we just be done:
+// [self doneButtonPushed:self];
+}
+
+//tp://back - browser-back
+- (void) navBack:(NSURL*)url {
+    [self backButtonPushed:self];
+}
+
+//tp://reload - reload the offerwall (clear browsing history)
+- (void) navReload:(NSURL*)url {
+    // well, lets reload the current webview, resetting the cache
+    [TpUrlManager clearHTTPCache];
+    [self loadOfferwallForTouchpoint:self.currentTouchpointName];
+}
+
+//tp://refresh - reload the current page
+- (void) navRefresh:(NSURL*)url {
+    [self.webViewContainer loadRequest:self.currentRequest];
+}
+
+//tp://offerwall/[url] - open [url] in the OfferWallContainer. being used with the protocol tp://offerwall/http://www.google.com
+- (void) navOfferwall:(NSURL*)url {
+    NSURL *owURL = [TpUrlManager getURLFromRelativePath:url];
+    NSURLRequest* request = [NSURLRequest requestWithURL:owURL];
+    TPLog(@"open owURL %@", owURL);
+    [self goToOfferwall];
+    [self.webViewContainer loadRequest:request];
+}
+
+//tp://offer/[url] - open [url] in the Offer. being used with the protocol tp://offerwall/http://www.google.com
+- (void) navOffer:(NSURL*)url {
+    NSURL *offerURL = [TpUrlManager getURLFromRelativePath:url];
+    NSURLRequest* request = [NSURLRequest requestWithURL:offerURL];
+    TPLog(@"open offerURL %@", offerURL);
+    [self goToOfferwall];
+    [self unloadOfferContainer];
+    [self loadOfferContainerWithRequest:request];
+}
+
+//tp://changeHeaderHeight/[height] - set the header height to [height] (pixel density = 1)
+- (void) navChangeHeaderHeight:(NSURL*)url {
+    int height = [[url.pathComponents objectAtIndex:1] intValue];
+    TPLog(@"New height is %d", height);
+
+    // review both heights of webview & toolbar
+    CGRect webFrame = self.webViewContainer.frame;
+    CGRect tbFrame = self.webToolbar.frame;
+
+    CGFloat offset = tbFrame.size.height - height;
+    webFrame.size.height += offset;
+    webFrame.origin.y -= offset;
+    tbFrame.size.height = height;
+
+    self.webViewContainer.scrollView.frame = webFrame;
+    self.webToolbar.scrollView.frame = tbFrame;
+
+    TPLog(@"web container frame %@", NSStringFromCGRect(self.webViewContainer.frame));
+    TPLog(@"web toolbar %@", NSStringFromCGRect(self.webToolbar.frame));
+}
+
+// stop webviews clearing its delegates first
+- (void)stopWebViews {
+    TPLogEnter;
+    self.offerwallContainer.delegate = nil;
+    [self.offerwallContainer stopLoading];
+    self.offerContainer.delegate = nil;
+    [self.offerContainer stopLoading];
 }
 
 @end

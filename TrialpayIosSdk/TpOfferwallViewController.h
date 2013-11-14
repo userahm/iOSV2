@@ -2,7 +2,7 @@
 //  TpOfferwallViewController.m
 //
 //  Created by Trialpay Inc.
-//  Copyright (c) 2013 Trialpay Inc. All rights reserved.
+//  Copyright (c) 2013 TrialPay, Inc. All Rights Reserved.
 //
 
 #import <UIKit/UIKit.h>
@@ -17,12 +17,11 @@
 
 @interface TpOfferwallViewController : UIViewController <TpWebViewDelegate>
 
-- (id)initWithTouchpointName:(NSString *)touchpointName;
-
 @property (strong, nonatomic, readonly) NSString *touchpointName;
-
 @property (strong, nonatomic) id<TpOfferwallViewControllerDelegate> delegate;
-
 @property (strong, nonatomic) IBOutlet TpWebView *tpWebView;
+
+- (id)initOfferwallWithTouchpointName:(NSString *)touchpointName;
+- (id)initDealspotWithTouchpointName:(NSString *)touchpointName withUrl:(NSString *)dealspotUrl;
 
 @end

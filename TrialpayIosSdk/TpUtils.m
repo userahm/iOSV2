@@ -8,7 +8,17 @@
 
 #import "TpUtils.h"
 
+#if !defined(TRIALPAY_VERBOSE)
+BOOL __trialpayVerbose=NO;
+#else
+BOOL __trialpayVerbose=YES;
+#endif
+
 @implementation TpUtils
+
++ (void)verboseLogging:(BOOL)verbose {
+    __trialpayVerbose = verbose;
+}
 
 + (NSString*) appVersion {
     NSString* version = [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleVersion"];

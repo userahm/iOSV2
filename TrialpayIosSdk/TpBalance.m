@@ -1,6 +1,8 @@
-//  Copyright (C) 2013 TrialPay, Inc All Rights Reserved
 //
 //  TpBalance.m
+//
+//  Created by Trialpay Inc.
+//  Copyright (c) 2013 TrialPay, Inc. All Rights Reserved.
 //
 
 #import "TpBalance.h"
@@ -8,6 +10,7 @@
 #import "TpUrlManager.h"
 #import "TpUtils.h"
 #import "TpSdkConstants.h"
+#import "TpArcSupport.h"
 
 @implementation TpBalance
 
@@ -22,19 +25,18 @@
     self = [super init];
     
     if (self) {
-        [self setSid: sid];
-        [self setVic: vic];
+        _sid = [sid TP_RETAIN];
+        _vic = [vic TP_RETAIN];
     }
     
     return self;
 }
 
-- (void)setSid:(NSString *)sid {
-    _sid = sid;
-}
-
-- (void)setVic:(NSString *)vic {
-    _vic = vic;
+- (void)dealloc {
+    [_sid TP_RELEASE];
+    [_vic TP_RELEASE];
+    [_lastQueryInfo TP_RELEASE];
+    [super TP_DEALLOC];
 }
 
 static NSError *__lastError;
@@ -104,7 +106,7 @@ static NSError *__lastError;
                 return nil;
             }
 
-            _lastQueryInfo = [NSMutableDictionary dictionaryWithDictionary: balanceInfo];
+            _lastQueryInfo = [[NSMutableDictionary dictionaryWithDictionary: balanceInfo] TP_RETAIN];
             _timeoutInSeconds = [queriedSecondsValid doubleValue];
             _lastQueryTime = currentTime;
 

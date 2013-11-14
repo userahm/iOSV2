@@ -1,8 +1,6 @@
 //
 // Created by Daniel Togni on 9/27/13.
-// Copyright (c) 2013 TrialPay Inc. All rights reserved.
-//
-// To change the template use AppCode | Preferences | File Templates.
+// Copyright (c) 2013 TrialPay, Inc. All Rights Reserved.
 //
 
 // do not expose to users the following constants
@@ -10,6 +8,7 @@
 extern NSString *kTPKeyBalance;
 extern NSString *kTPKeyUserCreationTime;
 extern NSString *kTPKeyVisitTimestamps;
+extern NSString *kTPKeyVisitLengths;
 extern NSString *kTPKeyTouchpointNames;
 extern NSString *kTPKeyBalances;
 extern NSString *kTPKeyVICs;
@@ -22,4 +21,3 @@ extern NSString *kTPKeyDollarAmount;
 extern NSString *kTPKeyVCAmount;
 extern NSString *kTPSid;
 extern NSString *kTPKeySecondsValid;
-
