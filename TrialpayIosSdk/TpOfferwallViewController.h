@@ -10,7 +10,7 @@
 @class TpOfferwallViewController;
 
 @protocol TpOfferwallViewControllerDelegate
-- (void)tpOfferwallViewController:(TpOfferwallViewController *)tpOfferwallViewController close:(id)sender;
+- (void)tpOfferwallViewController:(TpOfferwallViewController *)tpOfferwallViewController close:(id)sender forTouchpointName:(NSString *)touchpointName;
 @end
 
 #import "TpWebView.h"
@@ -21,7 +21,6 @@
 @property (strong, nonatomic) id<TpOfferwallViewControllerDelegate> delegate;
 @property (strong, nonatomic) IBOutlet TpWebView *tpWebView;
 
-- (id)initOfferwallWithTouchpointName:(NSString *)touchpointName;
-- (id)initDealspotWithTouchpointName:(NSString *)touchpointName withUrl:(NSString *)dealspotUrl;
+- (id)initWithTouchpointName:(NSString *)touchpointName;
 
 @end

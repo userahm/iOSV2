@@ -1,5 +1,5 @@
 //
-// Created by Daniel Togni on 9/27/13.
+// Created by Trialpay, Inc. on 9/27/13.
 // Copyright (c) 2013 TrialPay, Inc. All Rights Reserved.
 //
 
@@ -8,6 +8,10 @@
 #import "BaseTrialpayManager.h"
 #import "TpDataStore.h"
 #import "TpArcSupport.h"
+#import "TrialpayManager.h"
+
+// Terminator for buildQueryString, intentionally asymmetric
+#define TP_END_QUERY @"__**TPENDQUERY*_*_"
 
 NSString *kTPKeyCustomDispatchPrefixUrl = @"customDispathPath";
 NSString *kTPKeyCustomBalancePrefixUrl = @"customBalancePath";
@@ -28,7 +32,7 @@ NSString *kTPKeyCustomNavigationBarPrefixUrl = @"customNavigationBarPrefixUrl";
 @end
 
 @implementation TpUrlManager {
-
+    
 }
 
 TpUrlManager *__TrialPayURLManagerSingleton = nil;
@@ -47,21 +51,10 @@ TpUrlManager *__TrialPayURLManagerSingleton = nil;
     TPLog(@"Cache Cleared!");
 }
 
-+ (NSString *)URLEncodeString:(NSString*)string {
-    // URL-encode according to RFC 3986
-    NSString *result = (NSString *)CFBridgingRelease(CFURLCreateStringByAddingPercentEscapes(kCFAllocatorDefault, (__bridge CFStringRef)string, NULL, (__bridge CFStringRef)@"!*'();:@&=+$,/?%#[]", kCFStringEncodingUTF8));
-    return result;
-}
-
-+ (NSString*)URLDecodeString:(NSString*)string {
-    NSString *result = (NSString *)CFBridgingRelease(CFURLCreateStringByReplacingPercentEscapesUsingEncoding(kCFAllocatorDefault,(__bridge CFStringRef)string, (__bridge CFStringRef)@"", kCFStringEncodingUTF8));
-    return result;
-}
-
 #pragma mark - Prefix URLs
 
 + (NSString *)getPrefixUrl:(TPPrefixUrl)prefixUrl {
-
+    
 #if defined(TRIALPAY_ALLOW_CUSTOM_PATH)
     NSString *key = [self keyForPrefixUrl:prefixUrl];
     NSString *customPath = [[TpDataStore sharedInstance] dataValueForKey:key];
@@ -69,16 +62,26 @@ TpUrlManager *__TrialPayURLManagerSingleton = nil;
         return customPath;
     }
 #endif
-
+    
     switch (prefixUrl) {
-        case TPOfferwallDispatchPrefixUrl:          return [NSString stringWithFormat:@"%@%@%@", @"https://www.", @"trialpay.com/", @"dispatch/"];
-        case TPBalancePrefixUrl:                    return [NSString stringWithFormat:@"%@%@%@", @"https://www.", @"trialpay.com/", @"api/balance/"];
-        case TPDealspotTouchpointPrefixUrl:         return [NSString stringWithFormat:@"%@%@%@", @"http://geo.", @"tp-cdn.com/", @"mobile/ds/"];
-        case TPDealspotGeoPrefixUrl:                break;
-        case TPUserPrefixUrl:                       break;
-        case TPSrcPrefixUrl:                        break;
-        case TPDeaslpotAvailabilityPrefixUrl:       return [NSString stringWithFormat:@"%@%@%@", @"http://geo.", @"tp-cdn.com/", @"api/interstitial/v1/"];
-//        case TPNavigationBarPrefixUrl:              return @"http://dtogni.trialpay.com:4766/nav.html";
+        case TPOfferwallDispatchPrefixUrl:
+            return [NSString stringWithFormat:@"%@%@%@", @"https://www.", @"trialpay.com/", @"dispatch/"];
+
+        case TPBalancePrefixUrl:
+            return [NSString stringWithFormat:@"%@%@%@", @"https://www.", @"trialpay.com/", @"api/balance/"];
+
+        case TPDealspotTouchpointPrefixUrl:
+            return [NSString stringWithFormat:@"%@%@%@", @"http://geo.", @"tp-cdn.com/", @"mobile/ds/"];
+
+        case TPDealspotGeoPrefixUrl: break;
+        case TPUserPrefixUrl: break;
+        case TPSrcPrefixUrl: break;
+
+        case TPDeaslpotAvailabilityPrefixUrl:
+            return [NSString stringWithFormat:@"%@%@%@", @"http://geo.", @"tp-cdn.com/", @"api/interstitial/v1/"];
+
+        case TPNavigationBarPrefixUrl:
+            return [NSString stringWithFormat:@"%@%@%@", @"https://www.", @"trialpay.com/", @"social/offers/html5/navbar/"];
     }
     return nil;
 }
@@ -119,50 +122,129 @@ TpUrlManager *__TrialPayURLManagerSingleton = nil;
 #endif
 
 #pragma mark - Build URLS
-+ (NSString *)balancePathWithVic:(NSString *)vic andSid:(NSString *)sid{
-    return [[NSString stringWithFormat:@"%@?vic=%@&sid=%@", [self getPrefixUrl:TPBalancePrefixUrl], vic, sid] stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
-}
-
-+ (NSString *)balancePathWithVic:(NSString *)vic andSid:(NSString *)sid usingBalanceInfo:(NSDictionary *)balanceInfo {
-    NSString *acknowledgeEndpoint = [NSString stringWithFormat:@"%@?vic=%@&sid=%@", [self getPrefixUrl:TPBalancePrefixUrl], vic, sid];
-    TPLog(@"balanceEndpoint = %@",acknowledgeEndpoint);
-    for (id key in balanceInfo) {
-        id value = [balanceInfo objectForKey: key];
-        acknowledgeEndpoint = [NSString stringWithFormat:@"%@&%@=%@", acknowledgeEndpoint, key, value];
-    }
-    return [acknowledgeEndpoint stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
-}
-
-- (NSString *)offerwallUrlForTouchpoint:(NSString *)touchpointName {
++ (NSString *)navigationPathForTouchpoint:(NSString *)touchpointName {
     NSDictionary *data = [self getVicAndSid:touchpointName];
     if (!data)
         return nil;
+    
+    return [NSString stringWithFormat:@"%@?%@", [self getPrefixUrl:TPNavigationBarPrefixUrl], [TpUrlManager buildQueryString:@"vic", [data objectForKey:@"vic"], TP_END_QUERY]];
+}
 
-    NSMutableString *url = [NSMutableString stringWithFormat:@"%@%@?sid=%@&appver=%@&idfa=%@&sdkver=%@&tp_base_page=1",
-                    [TpUrlManager getPrefixUrl:TPOfferwallDispatchPrefixUrl],
-                    [data objectForKey:@"vic"],
-                    [data objectForKey:@"sid"],
-                    [TpUtils appVersion],
-                    [TpUtils idfa],
-                    [BaseTrialpayManager sdkVersion]];
++ (NSString *)balancePathWithVic:(NSString *)vic andSid:(NSString *)sid{
+    return [NSString stringWithFormat:@"%@?%@", [self getPrefixUrl:TPBalancePrefixUrl], [TpUrlManager buildQueryString:
+                                                                                         @"vic", vic,
+                                                                                         @"sid", sid,
+                                                                                         TP_END_QUERY]];
+}
 
-    [url appendString:[self customParamString:true]];
++ (NSString *)balancePathWithVic:(NSString *)vic andSid:(NSString *)sid usingBalanceInfo:(NSDictionary *)balanceInfo {
+    NSMutableString *acknowledgeEndpoint = [NSMutableString stringWithFormat:@"%@?%@", [self getPrefixUrl:TPBalancePrefixUrl], [TpUrlManager buildQueryString:
+                                                                                                                                @"vic", vic,
+                                                                                                                                @"sid", sid,
+                                                                                                                                TP_END_QUERY]];
+    TPLog(@"balanceEndpoint = %@",acknowledgeEndpoint);
+    if ([balanceInfo count] > 0) {
+        [acknowledgeEndpoint appendFormat:@"&%@", [TpUrlManager buildQueryStringFromDictionary:balanceInfo]];
+    }
+    TPLog(@"balanceEndpoint = %@",acknowledgeEndpoint);
+    return acknowledgeEndpoint;
+}
+
+- (NSString *)offerwallUrlForTouchpoint:(NSString *)touchpointName {
+    // if its a dealspot, than return the registered URL, otherwise build the offerwall url
+    NSMutableString *url = [[[BaseTrialpayManager sharedInstance] urlForDealspotTouchpoint:touchpointName] mutableCopy];
+    if (!url) {
+        NSDictionary *data = [TpUrlManager getVicAndSid:touchpointName];
+        if (!data)
+            return nil;
+        
+        url = [NSMutableString stringWithFormat:@"%@%@?",
+               [TpUrlManager getPrefixUrl:TPOfferwallDispatchPrefixUrl],
+               [TpUrlManager URLEncodeQueryString:[data objectForKey:@"vic"]]];
+        [self addCommonQueryParams:touchpointName toUrl:url];
+    } else {
+        // DS offer URL does not contain common query params
+        [url appendFormat:@"&%@", [TpUrlManager buildQueryString:@"tp_base_page", @"1", TP_END_QUERY]];
+    }
+    
+    return url;
+}
+
+- (NSString *)dealspotUrlForTouchpoint:(NSString *)touchpointName withSize:(CGSize)size {
+    NSDictionary *data = [TpUrlManager getVicAndSid:touchpointName];
+    if (!data)
+        return nil;
+
+    NSString *_uh = [TpUrlManager getPrefixUrl:TPUserPrefixUrl];
+    NSString *_sh = [TpUrlManager getPrefixUrl:TPSrcPrefixUrl];
+    NSString *_gh = [TpUrlManager getPrefixUrl:TPDealspotGeoPrefixUrl];
+    NSString *dealspotPrefixUrl = [TpUrlManager getPrefixUrl:TPDealspotTouchpointPrefixUrl];
+
+    NSMutableString *urlAddress = [NSMutableString stringWithFormat:@"%@?%@", dealspotPrefixUrl, [TpUrlManager buildQueryString:
+            @"vic", [data objectForKey:@"vic"],
+            @"height", [NSString stringWithFormat:@"%fpx", size.height],
+            @"width", [NSString stringWithFormat:@"%fpx", size.width],
+            // optional values are excluded by buildQueryString
+            @"__uh", _uh,
+            @"__gh", _gh,
+            @"__sh", _sh,
+            TP_END_QUERY]];
+    [self addCommonQueryParams:touchpointName toUrl:urlAddress];
+
+    return urlAddress;
+}
+
+- (NSString *)dealspotAvailabilityUrlForTouchpoint:(NSString *)touchpointName userAgent:(NSString *)userAgent {
+    NSDictionary *data = [TpUrlManager getVicAndSid:touchpointName];
+    if (!data)
+        return nil;
+
+    NSString *availabilityUrl = [TpUrlManager getPrefixUrl:TPDeaslpotAvailabilityPrefixUrl];
+
+    NSString *urlAddress = [NSString stringWithFormat:@"%@/?%@", availabilityUrl,
+                                                      [TpUrlManager buildQueryString:
+                                                              @"vic", [data objectForKey:@"vic"],
+                                                              @"sid", [data objectForKey:@"sid"],
+                                                              @"ua", userAgent,
+                                                              TP_END_QUERY]];
+
+    return urlAddress;
+}
+
+- (void)addCommonQueryParams:(NSString *)touchpointName toUrl:(NSMutableString *)url {
+    NSString *lastChar = [url substringFromIndex:url.length-1];
+    if (![lastChar isEqualToString:@"&"]) {
+        if (![lastChar isEqualToString:@"?"]) {
+            [url appendString:@"&"];
+        }
+    }
+    [url appendFormat:@"%@", [TpUrlManager buildQueryString:
+            @"sid", [[BaseTrialpayManager sharedInstance] sid],
+            @"appver", [TpUtils appVersion],
+            @"idfa", [TpUtils idfa],
+            @"sdkver", [BaseTrialpayManager sdkVersion],
+            @"tp_base_page", @"1",
+            TP_END_QUERY]];
+
+    NSString *customParams = [self customParamString:true];
+    if ([customParams length] > 0) {
+        [url appendFormat:@"&%@", customParams];
+    }
 
     NSString *extraUrlParameters = [self extraUrlParametersForTouchpoint:touchpointName];
-    if (extraUrlParameters != nil) {
+    if ([extraUrlParameters length] > 0) {
         [url appendFormat:@"&%@", extraUrlParameters];
     }
 
-    return [url stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
 }
 
-- (NSDictionary *)getVicAndSid:(NSString *)touchpointName {
++ (NSDictionary *)getVicAndSid:(NSString *)touchpointName {
     BaseTrialpayManager *trialpayManager = [BaseTrialpayManager sharedInstance];
     if (nil == trialpayManager) {
         TPCustomerError(@"TrialpayManager Instance is not accessible. Blocking URL creation", @"TrialpayManager Instance is not accessible. Blocking URL creation");
         return nil;
     }
-
+    
     // Resolve vic to touchpointName and vice-versa
     NSString *vic = [trialpayManager vicForTouchpoint:touchpointName];
     if (nil == vic) {
@@ -177,111 +259,134 @@ TpUrlManager *__TrialPayURLManagerSingleton = nil;
  */
 - (NSString *)extraUrlParametersForTouchpoint:(NSString *)touchpointName {
     TPLog(@"extraUrlParametersForTouchpoint:%@", touchpointName);
-
-    NSMutableArray *params = [[NSMutableArray array] TP_RETAIN];
-
+    
+    NSMutableString *queryString = [NSMutableString new];
+    
     NSMutableDictionary *vcPurchaseInfo = [[TpDataStore sharedInstance] dataValueForKey:kTPKeyVCPurchaseInfo];
     NSMutableDictionary *vcPurchaseInfoForTouchpoint = [vcPurchaseInfo objectForKey:touchpointName];
-
-    if (vcPurchaseInfoForTouchpoint != nil) {
-        [params addObject:[NSString stringWithFormat:@"total_dollars_spent=%@&total_vc_earned=%@",
-                           [vcPurchaseInfoForTouchpoint objectForKey:kTPKeyDollarAmount],
-                           [vcPurchaseInfoForTouchpoint objectForKey:kTPKeyVCAmount]]];
-    }
-
     NSString *gender = [[TpDataStore sharedInstance] dataValueForKey:kTPKeyGender];
     NSString *age    = [[TpDataStore sharedInstance] dataValueForKey:kTPKeyAge];
     NSString *level  = [[TpDataStore sharedInstance] dataValueForKey:kTPKeyLevel];
     NSString *userCreationTime  = [[TpDataStore sharedInstance] dataValueForKey:kTPKeyUserCreationTime];
     NSArray *visitTimestamps    = [[TpDataStore sharedInstance] dataValueForKey:kTPKeyVisitTimestamps];
     NSArray *visitLengths       = [[TpDataStore sharedInstance] dataValueForKey:kTPKeyVisitLengths];
-
+    NSMutableDictionary *vcBalance = [[TpDataStore sharedInstance] dataValueForKey:kTPKeyVCBalance];
+    NSString *genderCode = nil;
+    NSString *visitTimestampsString = nil;
+    NSString *visitLengthsString = nil;
+    
     if (gender != nil) {
         Gender genderValue = (Gender) [gender integerValue];
-        NSString *genderCode = [TpUtils genderCodeForValue:genderValue];
-        [params addObject:[NSString stringWithFormat:@"tp_gender=%@", genderCode]];
+        genderCode = [TpUtils genderCodeForValue:genderValue];
     }
-
-    if (age != nil) {
-        [params addObject:[NSString stringWithFormat:@"tp_age=%@", age]];
-    }
-
-    NSMutableDictionary *vcBalance = [[TpDataStore sharedInstance] dataValueForKey:kTPKeyVCBalance];
-
-    if ([vcBalance objectForKey:touchpointName] != nil) {
-        [params addObject:[NSString stringWithFormat:@"vc_balance=%@", [vcBalance objectForKey:touchpointName]]];
-    }
-
-    if (level != nil) {
-        [params addObject:[NSString stringWithFormat:@"current_level=%@", level]];
-    }
-
-    if (userCreationTime != nil) {
-        [params addObject:[NSString stringWithFormat:@"user_creation_timestamp=%@", userCreationTime]];
-    }
-
+    
     if (visitTimestamps != nil) {
-        NSString *visitTimestampsString = [visitTimestamps componentsJoinedByString:@","];
-        [params addObject:[NSString stringWithFormat:@"visit_timestamps=%@", visitTimestampsString]];
+        visitTimestampsString = [visitTimestamps componentsJoinedByString:@","];
     }
-
+    
     if (visitLengths != nil) {
-        NSString *visitLengthsString = [visitLengths componentsJoinedByString:@","];
-        [params addObject:[NSString stringWithFormat:@"visit_lengths=%@", visitLengthsString]];
+        visitLengthsString = [visitLengths componentsJoinedByString:@","];
     }
-
-    [params TP_AUTORELEASE];
-    return [params componentsJoinedByString:@"&"];
+    
+    [queryString appendString:[TpUrlManager buildQueryString:
+                               @"total_dollars_spent", [vcPurchaseInfoForTouchpoint objectForKey:kTPKeyDollarAmount],
+                               @"total_vc_earned", [vcPurchaseInfoForTouchpoint objectForKey:kTPKeyVCAmount],
+                               @"tp_gender", genderCode,
+                               @"tp_age", age,
+                               @"vc_balance", [vcBalance objectForKey:touchpointName],
+                               @"current_level", level,
+                               @"user_creation_timestamp", userCreationTime,
+                               @"visit_timestamps", visitTimestampsString,
+                               @"visit_lengths", visitLengthsString,
+                               TP_END_QUERY]];
+    
+    [queryString TP_AUTORELEASE];
+    return queryString;
 }
 
-- (NSString *) customParamString:(BOOL)clearParams {
+- (NSString *)customParamString:(BOOL)clearParams {
     BaseTrialpayManager *trialpayManager = [BaseTrialpayManager sharedInstance];
     NSDictionary *customParams = [trialpayManager consumeCustomParams:clearParams];
+    
+    return [TpUrlManager buildQueryStringFromDictionary:customParams];
+}
 
-    if (![customParams count]) return @"";
-    NSMutableString *result = [[NSMutableString alloc] init];
-    for (NSString *paramName in [customParams keyEnumerator]) {
-        NSString *encodedParamName = [paramName stringByReplacingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
-        NSString *encodedParamValue = [[customParams valueForKey:paramName] stringByReplacingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
-        if (nil == encodedParamName || nil == encodedParamValue) {
-            TPLog(@"Skips |%@=%@| because of an encoding exception", paramName, [customParams valueForKey:paramName]);
+#pragma mark - URL & Query encoding
+
+// ALWAYS USE this function to build query string to prevent improper encoding.
+// It encodes all keys and values.
+// Note that variadic params must be nil terminated, or have a count.
+// As for now we are allowing nil values to be passed (will be discarded from the query string), we need another terminator (TP_END_QUERY).
++ (NSString *)buildQueryString:(NSString *) firstString, ... {
+    NSMutableArray *encodedPairs = [NSMutableArray new];
+    
+    va_list args;
+    va_start(args, firstString);
+    
+    BOOL isKey = YES;
+    NSString *key;
+    NSString *value;
+    id arg;
+
+    // loop key/values until find TP_END_QUERY.
+    for (arg = firstString; ![TP_END_QUERY isEqualToString:arg]; arg = va_arg(args, id)) {
+        // we get non-strings (numbers), so we have to stringify them
+        NSString *sArg = [arg isKindOfClass:[NSString class]]?arg:[arg stringValue];
+        if (isKey) {
+            if (nil != arg) {
+                key = [TpUrlManager URLEncodeQueryString:sArg];
+            } else {
+                key = nil;
+            }
         } else {
-            [result appendFormat:@"&%@=%@", encodedParamName, encodedParamValue];
+            // if key or value are nil, lets not include it at all
+            if (nil != arg && nil != key) {
+                value = [TpUrlManager URLEncodeQueryString:sArg];
+                [encodedPairs addObject:[NSString stringWithFormat:@"%@=%@", key, value]];
+            } else {
+                TPLog(@"Skips |%@=%@| of an encoding error or nil keys or values", key, arg);
+            }
+        }
+
+        // expecting key1, value1, key2, value2
+        isKey = !isKey;
+    };
+    va_end(args);
+    
+    [encodedPairs TP_AUTORELEASE];
+    return [encodedPairs componentsJoinedByString:@"&"];
+}
+
+// ALWAYS USE this function to build query string to prevent improper encoding
++ (NSString *)buildQueryStringFromDictionary:(NSDictionary *)queryDict {
+    if (![queryDict count]) return @"";
+    NSMutableArray *encodedPairs = [[NSMutableArray alloc] init];
+
+    for (NSString *paramName in [queryDict keyEnumerator]) {
+        NSString *encodedParamName = [TpUrlManager URLEncodeQueryString:paramName];
+        id arg = [queryDict valueForKey:paramName];
+        // we get non-strings (numbers), so we have to stringify them
+        NSString *sArg = [arg isKindOfClass:[NSString class]]?arg:[arg stringValue];
+        NSString *encodedParamValue = [TpUrlManager URLEncodeQueryString:sArg];
+        if (nil == encodedParamName || nil == encodedParamValue) {
+            TPLog(@"Skips |%@=%@| because of an encoding error or nil keys or values", paramName, [queryDict valueForKey:paramName]);
+        } else {
+            [encodedPairs addObject:[NSString stringWithFormat:@"%@=%@", encodedParamName, encodedParamValue]];
         }
     }
-    return [result TP_AUTORELEASE];
+    [encodedPairs TP_AUTORELEASE];
+    return [encodedPairs componentsJoinedByString:@"&"];
 }
 
-- (NSString *)dealspotUrlForTouchpoint:(NSString *)touchpointName withSize:(CGSize)size {
-    NSDictionary *data = [self getVicAndSid:touchpointName];
-    if (!data)
-        return nil;
-
-    NSString *_uh = [TpUrlManager getPrefixUrl:TPUserPrefixUrl];
-    NSString *_sh = [TpUrlManager getPrefixUrl:TPSrcPrefixUrl];
-    NSString *_gh = [TpUrlManager getPrefixUrl:TPDealspotGeoPrefixUrl];
-    NSString *dealspotPrefixUrl = [TpUrlManager getPrefixUrl:TPDealspotTouchpointPrefixUrl];
-
-    NSMutableString *urlAddress = [NSMutableString stringWithFormat:@"%@?vic=%@&sid=%@&height=%fpx&width=%fpx", dealspotPrefixUrl, [data objectForKey:@"vic"], [data objectForKey:@"sid"], size.height, size.width];
-
-    if (_uh) [urlAddress appendFormat:@"&__uh=%@", _uh];
-    if (_gh) [urlAddress appendFormat:@"&__gh=%@", _gh];
-    if (_sh) [urlAddress appendFormat:@"&__sh=%@", _sh];
-
-    NSLog(@"Dev MDS v2:");
-    NSLog(@"%@", urlAddress);
-    return urlAddress;
++ (NSString *)URLEncodeQueryString:(NSString*)string {
+    // URL-encode according to RFC 3986
+    NSString *result = (NSString *)CFBridgingRelease(CFURLCreateStringByAddingPercentEscapes(kCFAllocatorDefault, (__bridge CFStringRef)string, NULL, (__bridge CFStringRef)@"!*'();:@&=+$,/?%#[]", kCFStringEncodingUTF8));
+    return result;
 }
 
-
-- (NSString *)dealspotAvailabilityUrlForTouchpoint:(NSString *)touchpointName userAgent:(NSString *)userAgent {
-    NSDictionary *data = [self getVicAndSid:touchpointName];
-    if (!data)
-        return nil;
-
-    NSString *availabilityUrl = [TpUrlManager getPrefixUrl:TPDeaslpotAvailabilityPrefixUrl];
-
-    NSString *urlAddress = [NSString stringWithFormat:@"%@/?vic=%@&sid=%@&ua=%@", availabilityUrl, [data objectForKey:@"vic"], [data objectForKey:@"sid"], userAgent];
-    return urlAddress;
++ (NSString *)URLDecodeQueryString:(NSString*)string {
+    NSString *result = (NSString *)CFBridgingRelease(CFURLCreateStringByReplacingPercentEscapesUsingEncoding(kCFAllocatorDefault,(__bridge CFStringRef)string, (__bridge CFStringRef)@"", kCFStringEncodingUTF8));
+    return result;
 }
+
 @end

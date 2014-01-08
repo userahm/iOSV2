@@ -1,5 +1,5 @@
 //
-// Created by Daniel Togni on 11/4/13.
+// Created by Trialpay, Inc. on 11/4/13.
 // Copyright (c) 2013 TrialPay Inc. All rights reserved.
 //
 

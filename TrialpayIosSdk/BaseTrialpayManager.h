@@ -14,9 +14,15 @@
 
 
 @class TrialpayManager;
+@class TpDealspotView;
 
+extern NSString *TPOfferwallOpenActionString; /*! The Trialpay offerwall was closed */
+extern NSString *TPOfferwallCloseActionString; /*! The Trialpay offerwall was closed */
+extern NSString *TPBalanceUpdateActionString;  /*! The device user balance was updated, check TrialpayManager::withdrawBalanceForTouchpoint:*/
 
 @interface BaseTrialpayManager : NSObject <TpOfferwallViewControllerDelegate>
+
+@property (nonatomic, assign) BOOL useWebNavigationBar;
 
 + (BaseTrialpayManager *)sharedInstance;
 + (NSString*)sdkVersion;
@@ -27,10 +33,17 @@
 - (NSString *)sid;
 
 - (void)registerVic:(NSString *)vic withTouchpoint:(NSString *)touchpointName;
-- (void)registerVic:(NSString *)vic withTouchpoint:(NSString *)touchpointName onOfferwallClose:(TPDelegateBlock)onOfferwallClose onBalanceUpdate:(TPDelegateBlock)onBalanceUpdate;
+
 - (void)openOfferwallForTouchpoint:(NSString *)touchpointName;
+
+- (TpDealspotView *)createDealspotViewForTouchpoint:(NSString *)touchpointName withFrame:(CGRect)touchpointFrame;
+
+- (void)stopDealspotViewForTouchpoint:(NSString *)touchpointName;
+
 - (void)initiateBalanceChecks;
 - (int)withdrawBalanceForTouchpoint:(NSString *)touchpointName;
+
+- (NSString *)urlForDealspotTouchpoint:(NSString *)touchpointName;
 
 - (void)setAge:(int)age;
 - (void)setGender:(Gender)gender;
@@ -42,6 +55,9 @@
 - (void)updateVcPurchaseInfoForTouchpoint:(NSString *)touchpointName dollarAmount:(float)dollarAmount vcAmount:(int)vcAmount;
 - (void)updateVcBalanceForTouchpoint:(NSString *)touchpointName vcAmount:(int)vcAmount;
 
+
 @property (strong, nonatomic) id<TrialpayManagerDelegate> delegate;
+
+- (void)registerDealspotURL:(NSString *)urlString forTouchpoint:(NSString *)touchpointName;
 
 @end

@@ -6,6 +6,7 @@
 //
 
 #import "TrialpayManager.h"
+#import "TpDealspotView.h"
 
 @implementation TrialpayManager
 
@@ -37,12 +38,16 @@ static TrialpayManager *__trialpayManagerInstance;
     [super registerVic:vic withTouchpoint:touchpointName];
 }
 
-- (void)registerVic:(NSString *)vic withTouchpoint:(NSString *)touchpointName onOfferwallClose:(TPDelegateBlock)onOfferwallClose onBalanceUpdate:(TPDelegateBlock)onBalanceUpdate {
-    [super registerVic:vic withTouchpoint:touchpointName onOfferwallClose:onOfferwallClose onBalanceUpdate:onBalanceUpdate];
-}
-
 - (void)openOfferwallForTouchpoint:(NSString *)touchpointName {
     [super openOfferwallForTouchpoint:touchpointName];
+}
+
+- (TpDealspotView *)createDealspotViewForTouchpoint:(NSString *)touchpointName withFrame:(CGRect)touchpointFrame {
+    return [super createDealspotViewForTouchpoint:touchpointName withFrame:touchpointFrame];
+}
+
+- (void)stopDealspotViewForTouchpoint:(NSString *)touchpointName {
+    return [super stopDealspotViewForTouchpoint:touchpointName];
 }
 
 - (void)initiateBalanceChecks {
@@ -80,6 +85,5 @@ static TrialpayManager *__trialpayManagerInstance;
 - (void)updateVcBalanceForTouchpoint:(NSString *)touchpointName vcAmount:(int)vcAmount {
     [super updateVcBalanceForTouchpoint:touchpointName vcAmount:vcAmount];
 }
-
 
 @end

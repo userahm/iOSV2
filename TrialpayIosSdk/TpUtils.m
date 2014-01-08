@@ -105,7 +105,7 @@ BOOL __trialpayVerbose=YES;
     
     uint8_t digest[CC_SHA1_DIGEST_LENGTH];
     
-    CC_SHA1(data.bytes, data.length, digest);
+    CC_SHA1(data.bytes, (CC_LONG)data.length, digest);
     
     NSMutableString *output = [NSMutableString stringWithCapacity:CC_SHA1_DIGEST_LENGTH * 2];
     
@@ -125,6 +125,16 @@ BOOL __trialpayVerbose=YES;
         case Female: return @"F";
         default: return @"U"; // unknown gender
     }
+}
+
+/*
+ * Returns the code for given gender ("M" for Male, "F" for Female and "U" for Unknown).
+ */
++ (Gender)genderValueForCode:(NSString*)genderStr {
+    TPLog(@"getGenderValueForCode:%@", genderStr);
+    if ([genderStr isEqualToString:@"M"]) return Male;
+    if ([genderStr isEqualToString:@"F"]) return Female;
+    return Unknown;
 }
 
 

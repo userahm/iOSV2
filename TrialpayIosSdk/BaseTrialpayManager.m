@@ -8,16 +8,20 @@
 #import "BaseTrialpayManager.h"
 #import "TpDataStore.h"
 #import "TpArcSupport.h"
+#import "TpDealspotView.h"
+#import "TrialpayManager.h"
 
 // how many UNIX timestamps for the customer's last sessions will be stored
 #define TP_MAX_VISIT_TIMESTAMPS 5
+
+NSString *TPOfferwallOpenActionString  = @"offerwall_open";
+NSString *TPOfferwallCloseActionString  = @"offerwall_close";
+NSString *TPBalanceUpdateActionString  = @"balance_update";
 
 @interface BaseTrialpayManager ()
 - (int)checkBalance;
 
 @property (assign, nonatomic) __block BOOL isShowingOfferwall; // will be modified by a block
-@property (strong, nonatomic) TPDelegateBlock balanceUpdateBlock;
-@property (strong, nonatomic) TPDelegateBlock offerwallCloseBlock;
 @property (nonatomic) NSTimeInterval userSessionTimeout; // To allow change on value
 @end
 
@@ -40,6 +44,8 @@
                     if (secondsValid < 0) {
                         secondsValid = defaultSecondsValid;
                     }
+                } else {
+                    TPLog(@"Skip balance update while offerwall is open");
                 }
                 TPLog(@"balanceQueryAndWithdraw before wait for %d", secondsValid);
                 [NSThread sleepForTimeInterval:secondsValid];
@@ -58,6 +64,7 @@
     NSOperationQueue *_balanceQueue;
     NSDate *_lastBackground;
     NSDate *_lastForeground;
+    NSMutableDictionary *_openDealspotViews;
 }
 
 #pragma mark - Initialization
@@ -77,6 +84,8 @@ BaseTrialpayManager *__baseTrialpayManager;
         // It may run right after this (forced) call when the application:didFinishLaunchingWithOptions: finishes
         [self applicationDidBecomeActiveNotification];
         [self startListeningToAppStateNotifications];
+
+        _openDealspotViews = [NSMutableDictionary new];
     }
     return self;
 }
@@ -114,7 +123,7 @@ NSMutableDictionary *customParams = nil;
         self.userSessionTimeout = 30*60; // defaults to 30 min
     }
 
-    // Only call apploaded if we were in bkg for a long time, as if device user competes an offer on browser it would
+    // Only call appLoaded if we were in bkg for a long time, as if device user competes an offer on browser it would
     // cause this function to be called.
     NSTimeInterval elapsedSinceLastBackground = -[_lastBackground timeIntervalSinceNow];
     TPLog(@"Elapsed %.0f (to=%.0f)", elapsedSinceLastBackground, self.userSessionTimeout);
@@ -203,7 +212,7 @@ NSMutableDictionary *customParams = nil;
 
 #pragma mark - Get SDK Version
 + (NSString*)sdkVersion {
-    return @"ios.2.77398";
+    return @"ios.2.78286";
 }
 
 #pragma mark - BaseTrialpayManager getter/setter
@@ -256,10 +265,10 @@ NSMutableDictionary *customParams = nil;
 }
 
 - (void)registerVic:(NSString *)vic withTouchpoint:(NSString *)touchpointName {
-    if (nil == vic) {
+    if (nil == vic || [vic length] == 0) {
         [NSException raise:@"TrialpayAPIException" format:@"Provide a valid (non-null) VIC for registerVic:withTouchpoint:"];
     }
-    if (nil == touchpointName) {
+    if (nil == touchpointName || [touchpointName length] == 0) {
         [NSException raise:@"TrialpayAPIException" format:@"Provide a valid (non-null) touchpoint name for registerVic:withTouchpoint:"];
     }
 
@@ -267,9 +276,22 @@ NSMutableDictionary *customParams = nil;
     // Get preregistered names
     NSMutableDictionary *touchpointNames = [self touchpointNames];
     // If the name is there and is set correctly - skip
-    if ([vic isEqualToString:[touchpointNames valueForKey:touchpointName]]) {
+    NSString *oldVic = [touchpointNames valueForKey:touchpointName];
+    if ([vic isEqualToString:oldVic]) {
         return;
     }
+    if (nil != oldVic) {
+        TPCustomerWarning(@"Reassigning touchpoint [] to vic", @"Reassigning touchpoint to vic '%@' (previously '%@')", vic, oldVic);
+    }
+
+    // R we trying to re-assign vic to another touchpoint?
+    NSString *oldTouchpoint = [self touchpointForVic:vic];
+    if (nil != oldTouchpoint) {
+        // Than lets warn and remove old association...
+        TPCustomerWarning(@"Reassigning vic [] to touchpoint", @"Reassigning vic to touchpoint '%@' (previously '%@')", touchpointName, oldTouchpoint);
+        [touchpointNames removeObjectForKey:oldTouchpoint];
+    }
+
     // Get the list of vics
     NSMutableArray *vics = [self vics];
     // If the new VIC name does not exist in the list (expected) add the vic to the vic list
@@ -277,6 +299,7 @@ NSMutableDictionary *customParams = nil;
         [vics addObject:vic];
         [[TpDataStore sharedInstance] setDataWithValue:vics forKey:kTPKeyVICs];
     }
+
     // Register the vic under the given touchpointName
     [touchpointNames setValue:vic forKey:touchpointName];
     [[TpDataStore sharedInstance] setDataWithValue:touchpointNames forKey:kTPKeyTouchpointNames];
@@ -285,12 +308,57 @@ NSMutableDictionary *customParams = nil;
 - (NSString *)vicForTouchpoint:(NSString *)touchpointName {
     TPLog(@"vicForTouchpoint:%@", touchpointName);
     NSDictionary *touchpointNames = [self touchpointNames];
-    
+
     NSString *vic = [touchpointNames valueForKey:touchpointName];
     if (nil == vic) {
         TPLog(@"Could not find VIC for touchpoint %@", touchpointName);
     }
     return vic;
+}
+
+- (NSString *)touchpointForVic:(NSString *)vic {
+    TPLog(@"touchpointForVic:%@", vic);
+    NSDictionary *touchpointNames = [self touchpointNames];
+
+    NSArray *touchpoints = [touchpointNames allKeysForObject:vic];
+    if ([touchpoints count] == 0) {
+        TPLog(@"Could not find touchpoint for VIC %@", vic);
+        return nil;
+    }
+    if ([touchpoints count] > 1) {
+        TPLog(@"Found more than one touchpoint for VIC %@", vic);
+    }
+    return [touchpoints firstObject];
+}
+
+- (void)registerDealspotURL:(NSString *)urlString forTouchpoint:(NSString *)touchpointName {
+    if (nil == touchpointName) {
+        [NSException raise:@"TrialpayAPIException" format:@"Provide a valid (non-null) touchpointName name for registerDealspotURL:forTouchpoint:"];
+    }
+    if (nil == [[self touchpointNames] objectForKey:touchpointName]) {
+        [NSException raise:@"TrialpayAPIException" format:@"TouchpointName must be registered with registerVic:withTouchpoint:"];
+    }
+
+    NSMutableDictionary *dsUrls = [[TpDataStore sharedInstance] dataValueForKey:kTPKeyDealspotURLs];
+    if (nil == dsUrls) {
+        dsUrls = [[[NSMutableDictionary alloc] init] TP_AUTORELEASE];
+    }
+    if (nil == urlString) {
+        [dsUrls removeObjectForKey:touchpointName];
+    } else {
+        [dsUrls setObject:urlString forKey:touchpointName];
+    }
+
+    [[TpDataStore sharedInstance] setDataWithValue:dsUrls forKey:kTPKeyDealspotURLs];
+}
+
+- (NSString *)urlForDealspotTouchpoint:(NSString *)touchpointName {
+    TPLog(@"urlForDealspotTouchpoint:%@", touchpointName);
+    NSDictionary *dsUrls = [[TpDataStore sharedInstance] dataValueForKey:kTPKeyDealspotURLs];
+
+    NSString *urlString = [dsUrls valueForKey:touchpointName];
+    // no warning on nil, as its also used to check if its a dealspot or not on TpOfferwallViewController
+    return urlString;
 }
 
 /*
@@ -379,31 +447,89 @@ NSMutableDictionary *customParams = nil;
 
 #pragma mark - Offerwall
 
+- (void)setDelegate:(id <TrialpayManagerDelegate>)delegate {
+    _delegate = delegate;
+    
+    // no checks if nil
+    if (nil == _delegate) {
+        return;
+    }
+
+    // We made the delegate methods optional, so we could allow older implementations to not fail.
+    // So, lets check that one of the methods is implemented (but not both).
+    BOOL hasDelegate = NO;
+    if ([(NSObject*)self.delegate respondsToSelector:@selector(trialpayManager:withAction:)]) {
+        hasDelegate = YES;
+        TPCustomerWarning(@"trialpayManager:withAction is deprecated", @"trialpayManager:withAction is deprecated in favor of trialpayManager:offerwallDidOpenForTouchpoint:, trialpayManager:offerwallDidCloseForTouchpoint: and trialpayManager:balanceWasUpdatedForTouchpoint:");
+    }
+    if ([(NSObject*)self.delegate respondsToSelector:@selector(trialpayManager:offerwallDidOpenForTouchpoint:)] ||
+            [(NSObject*)self.delegate respondsToSelector:@selector(trialpayManager:offerwallDidCloseForTouchpoint:)] ||
+            [(NSObject*)self.delegate respondsToSelector:@selector(trialpayManager:balanceWasUpdatedForTouchpoint:)]) {
+        if (hasDelegate) {
+            [NSException raise:@"TrialpayUseOneDelegateInterfaceOnly" format:@"Please update your TrialpayManagerDeleage removing the implementation of trialpayManager:withAction:.\nThe new interfaces are: trialpayManager:offerwallDidOpenForTouchpoint:, trialpayManager:offerwallDidCloseForTouchpoint: and trialpayManager:balanceWasUpdatedForTouchpoint:"];
+        }
+        hasDelegate = YES;
+    } else {
+        if (!hasDelegate) { // a warning message was already given with old delegate method.
+            TPCustomerWarning(@"Implement at least one delegate", @"Please implement at least one delegate method: trialpayManager:offerwallDidOpenForTouchpoint:, trialpayManager:offerwallDidCloseForTouchpoint: and trialpayManager:balanceWasUpdatedForTouchpoint:");
+        }
+    }
+
+    // if delegate was set but no methods were implemented, we give up, we cant live with that...
+    if (!hasDelegate) {
+        [NSException raise:@"TrialpayDelegateMustHaveAtLeastOneMethod" format:@"Please implement at least one delegate method: trialpayManager:offerwallDidOpenForTouchpoint:, trialpayManager:offerwallDidCloseForTouchpoint: and trialpayManager:balanceWasUpdatedForTouchpoint:"];
+    }
+}
+
 - (void)openOfferwallForTouchpoint:(NSString *)touchpointName {
     TPLog(@"openOfferwallForTouchpoint:%@", touchpointName);
     _isShowingOfferwall = YES;
-    TpOfferwallViewController *tpOfferwall = [[TpOfferwallViewController alloc] initOfferwallWithTouchpointName:touchpointName];
+    TPLog(@"isShowingOfferwall YES");
+    TpOfferwallViewController *tpOfferwall = [[TpOfferwallViewController alloc] initWithTouchpointName:touchpointName];
     tpOfferwall.delegate = self;
 
     UIViewController *root = [UIApplication sharedApplication].keyWindow.rootViewController;
     [root presentViewController:tpOfferwall animated:YES completion:nil];
-    
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (self.delegate) {
+            TPLog(@"Dispatching offerwallDidOpen to %@", self.delegate);
+            // methods are now optional, so we have to check for existence
+            if ([(NSObject*)self.delegate respondsToSelector:@selector(trialpayManager:withAction:)]) {
+                TPLog(@"Dispatching withAction");
+                [self.delegate trialpayManager:(TrialpayManager *)self withAction:TPOfferwallOpenAction];
+            }
+            if ([(NSObject*)self.delegate respondsToSelector:@selector(trialpayManager:offerwallDidOpenForTouchpoint:)]) {
+                TPLog(@"Dispatching offerwallDidOpenForTouchpoint");
+                [self.delegate trialpayManager:(TrialpayManager *)self offerwallDidOpenForTouchpoint:touchpointName];
+            }
+        }
+        // TODO: no block interface for now.
+    });
     [tpOfferwall TP_RELEASE];
 }
 
 #pragma mark - Dealspot
 
-- (void)openDealspotForTouchpoint:(NSString *)touchpointName withUrl:(NSString *)dealspotUrl {
-    TPLog(@"openDealspotForTouchpoint:%@", touchpointName);
-    _isShowingOfferwall = YES;
-    TpOfferwallViewController *tpOfferwall = [[TpOfferwallViewController alloc] initDealspotWithTouchpointName:touchpointName withUrl:dealspotUrl];
-    tpOfferwall.delegate = self;
-
-    UIViewController *root = [UIApplication sharedApplication].keyWindow.rootViewController;
-    [root presentViewController:tpOfferwall animated:YES completion:nil];
-
-    [tpOfferwall TP_RELEASE];
+- (TpDealspotView *)createDealspotViewForTouchpoint:(NSString *)touchpointName withFrame:(CGRect)touchpointFrame {
+    // auto stop previous view, if we are recreating for the same touchpoint
+    [self stopDealspotViewForTouchpoint:touchpointName];
+    TpDealspotView *trialpayDealspotObject = [[[TpDealspotView alloc] initWithFrame:touchpointFrame forTouchpoint:touchpointName] TP_AUTORELEASE];
+    [_openDealspotViews setObject:trialpayDealspotObject forKey:touchpointName];
+    return trialpayDealspotObject;
 }
+
+- (void)stopDealspotViewForTouchpoint:(NSString *)touchpointName {
+    TpDealspotView *dsView = [_openDealspotViews objectForKey:touchpointName];
+    if (dsView != nil) {
+        [dsView stopLoading];
+        [dsView removeFromSuperview];
+        [_openDealspotViews removeObjectForKey:touchpointName];
+    } else {
+        TPCustomerWarning(@"Dealspot view not found", @"Dealspot view not found for touchpoint %@", touchpointName);
+    }
+}
+
 
 #pragma mark - Balance
 
@@ -429,7 +555,7 @@ int __balanceApiErrorWait = 10;
     int minSecondsValid = -1;
     NSArray *vics = [self vics];
 
-    // there is a small chance checkbalance will be called multiple times, so lets protect __tpBalances
+    // there is a small chance checkBalance will be called multiple times, so lets protect __tpBalances
     @synchronized (__tpBalances) {
         NSArray *vicsCopy = [vics copy];
         for (NSString *vic in vicsCopy) {
@@ -460,10 +586,15 @@ int __balanceApiErrorWait = 10;
                     [self addDifferentialBalance:differentialBalance toVic:vic];
                     dispatch_async(dispatch_get_main_queue(), ^{
                         if (self.delegate) {
-                            [self.delegate trialpayManager:(TrialpayManager*)self withAction:TPBalanceUpdateAction];
-                        }
-                        if (self.balanceUpdateBlock) {
-                            self.balanceUpdateBlock((TrialpayManager*)self);
+                            TPLog(@"Dispatching balanceUpdate");
+                            // methods are now optional, so we have to check for existence
+                            if ([(NSObject*)self.delegate respondsToSelector:@selector(trialpayManager:withAction:)]) {
+                                [self.delegate trialpayManager:(TrialpayManager*)self withAction:TPBalanceUpdateAction];
+                            }
+                            if ([(NSObject*)self.delegate respondsToSelector:@selector(trialpayManager:balanceWasUpdatedForTouchpoint:)]) {
+                                NSString *touchpointName = [self touchpointForVic:vic];
+                                [self.delegate trialpayManager:(TrialpayManager *) self balanceWasUpdatedForTouchpoint:touchpointName];
+                            }
                         }
                     });
                 }
@@ -480,10 +611,16 @@ int __balanceApiErrorWait = 10;
 }
 
 static NSOperation *__balanceQueryAndWithdrawOperation;
-- (void)initiateBalanceChecks {
-    TPLogEnter;
+// Allow unittests to stop balance checks
+- (void)stopBalanceChecks {
     [__balanceQueryAndWithdrawOperation cancel];
     [__balanceQueryAndWithdrawOperation TP_RELEASE];
+    __balanceQueryAndWithdrawOperation = nil;
+}
+
+- (void)initiateBalanceChecks {
+    TPLogEnter;
+    [self stopBalanceChecks];
     __balanceQueryAndWithdrawOperation = [TPBalanceCheckOperation new];
     [_balanceQueue addOperation:__balanceQueryAndWithdrawOperation];
 }
@@ -551,31 +688,30 @@ static NSOperation *__balanceQueryAndWithdrawOperation;
 
 #pragma mark - Delegate
 
-// allow response by blocks
-- (void)registerVic:(NSString *)vic withTouchpoint:(NSString *)touchpointName onOfferwallClose:(TPDelegateBlock)onOfferwallClose onBalanceUpdate:(TPDelegateBlock)onBalanceUpdate {
-    [self registerVic:vic withTouchpoint:touchpointName];
-    self.balanceUpdateBlock = onBalanceUpdate;
-    self.offerwallCloseBlock = onOfferwallClose;
-}
+- (void)tpOfferwallViewController:(TpOfferwallViewController *)tpOfferwallViewController close:(id)sender forTouchpointName:(NSString *)touchpointName {
+    TPLogEnter;
+    // wait for the navigation animation ~ 300ms,
+    dispatch_after(TP_DISPATCH_TIME(0.4), dispatch_get_main_queue(), ^(void){
+        TPLogEnter;
+        _isShowingOfferwall = NO;
 
-- (void)tpOfferwallViewController:(TpOfferwallViewController *)tpOfferwallViewController close:(id)sender {
-    // the offerwall container just got closed. wake up the balance check
-    dispatch_async(dispatch_get_main_queue(), ^{
+        // the offerwall container just got closed. wake up the balance check
         if (self.delegate) {
-            [self.delegate trialpayManager:(TrialpayManager*)self withAction:TPOfferwallCloseAction];
+            // methods are now optional, so we have to check for existence
+            TPLog(@"Dispatching offerwallDidClose");
+            if ([(NSObject*)self.delegate respondsToSelector:@selector(trialpayManager:withAction:)]) {
+                [self.delegate trialpayManager:(TrialpayManager*)self withAction:TPOfferwallCloseAction];
+            }
+            if ([(NSObject*)self.delegate respondsToSelector:@selector(trialpayManager:offerwallDidCloseForTouchpoint:)]) {
+                [self.delegate trialpayManager:(TrialpayManager *) self offerwallDidCloseForTouchpoint:touchpointName];
+            }
         }
-        if (self.offerwallCloseBlock) {
-            self.offerwallCloseBlock((TrialpayManager*)self);
+
+        // recheck only if there is a balance check happening
+        if (__balanceQueryAndWithdrawOperation) {
+            [self initiateBalanceChecks]; // lets check right now!
         }
     });
-
-    // wait for the navigation animation ~ 300ms, only if there is a balance check happening
-    if (__balanceQueryAndWithdrawOperation) {
-        dispatch_after(TP_DISPATCH_TIME(0.4), dispatch_get_main_queue(), ^(void){
-            _isShowingOfferwall = NO;
-            [self initiateBalanceChecks]; // lets check right now!
-        });
-    }
 }
 
 @end

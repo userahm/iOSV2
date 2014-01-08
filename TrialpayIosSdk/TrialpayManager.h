@@ -8,7 +8,8 @@
 #import <Foundation/Foundation.h>
 #import "BaseTrialpayManager.h"
 #import "TpConstants.h"
-#include "TrialpayManagerDelegate.h"
+
+@class TpDealspotView;
 
 /*!
     @mainpage
@@ -120,19 +121,26 @@
     @param touchpointName The touchpoint to register.
 */
 - (void)registerVic:(NSString *)vic withTouchpoint:(NSString *)touchpointName;
-/*!
-    Register your VIC (vendor identification, see TrialpayManager::registerVic:withTouchpoint:) and blocks for the events of offerwall close and balance update (instead of the delegate trialpayManager:withAction:).
-    @param vic The campaign identifier.
-    @param touchpointName The touchpoint to register.
-    @param onOfferwallClose The block to be executed when the Offerwall closes.
-    @param onBalanceUpdate The block to be executed when there is a balance update.
-*/
-- (void)registerVic:(NSString *)vic withTouchpoint:(NSString *)touchpointName onOfferwallClose:(TPDelegateBlock)onOfferwallClose onBalanceUpdate:(TPDelegateBlock)onBalanceUpdate;
+
 /*!
     Open the Trialpay Offerwall for a given touchpoint.
     @param touchpointName The touchpoint.
 */
 - (void)openOfferwallForTouchpoint:(NSString *)touchpointName;
+
+/*!
+    Create the Trialpay Dealspot for a given touchpoint.
+    @param touchpointName The touchpoint.
+    @param touchpointFrame The frame for the touchpoint icon
+*/
+- (TpDealspotView *)createDealspotViewForTouchpoint:(NSString *)touchpointName withFrame:(CGRect)touchpointFrame;
+
+/*!
+    Stop and remove from UI the Trialpay Dealspot for a given touchpoint.
+    @param touchpointName The touchpoint.
+*/
+- (void)stopDealspotViewForTouchpoint:(NSString *)touchpointName;
+
 /*!
     Start balance checks. Call this method only once, within your application:didFinishLaunchingWithOptions:.
     @note Only start balance checks if you enabled the Balance Check API
@@ -198,10 +206,9 @@
 
 /*!
     Delegate for Offerwall close events and Balance update events, See TrialpayManagerDelegate.
-    @note You can alternatively use the method TrialpayManager::registerVic:withTouchpoint:onOfferwallClose:onBalanceUpdate:
-
     @include updateVcBalanceForTouchpoint.m
 */
 @property (strong, nonatomic) id<TrialpayManagerDelegate> delegate;
+
 
 @end

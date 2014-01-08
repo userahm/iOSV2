@@ -7,9 +7,10 @@
 
 #import "TpWebView.h"
 #import "TpUrlManager.h"
-#import "TpWebToolbar.h"
+#import "TpWebNavigationBar.h"
 #import "BaseTrialpayManager.h"
 #import "TpArcSupport.h"
+#import "TpDataStore.h"
 
 @interface TpWebView()
 @property (strong) NSString *initialUrl;
@@ -28,7 +29,7 @@
 
 /*
  * Loads the offerwall using the given frame size.
- * This is currently being overriden by -buildViewWithToolbarAndWidth:height:
+ * This is currently being overriden by -buildViewWithNavigationBarAndWidth:height:
  */
 - (id)initWithFrame:(CGRect)frame {
     TPLogEnter;
@@ -51,9 +52,9 @@
     TP_ARC_RELEASE(offerwallContainer);
     TP_ARC_RELEASE(webViewContainer);
     TP_ARC_RELEASE(mainView);
-    TP_ARC_RELEASE(toolbar);
+    TP_ARC_RELEASE(navigationBar);
 
-    TP_ARC_RELEASE(webToolbar);
+    TP_ARC_RELEASE(webNavigationBar);
     TP_ARC_RELEASE(backButton);
     TP_ARC_RELEASE(flexibleSpaceArea);
     TP_ARC_RELEASE(doneButton);
@@ -67,49 +68,59 @@
  * Sets the given offerwallUrl as the initialUrl for the offerwallContainer.
  * The url is loaded in -layoutSubviews
  */
-- (void)loadRequest:(NSString*)urlString {
+- (void)loadRequest:(NSString *)urlString {
     TPLogEnter;
     [self setInitialUrl:[NSString stringWithFormat:@"%@&tp_base_page=1", urlString]];
     if (nil != self.offerwallContainer) {
         NSURL *url = [NSURL URLWithString:self.initialUrl];
-        NSURLRequest* request = [NSURLRequest requestWithURL:url];
+        NSURLRequest *request = [NSURLRequest requestWithURL:url];
         [self.offerwallContainer loadRequest:request];
     }
 }
 
 #pragma mark - pragmatically build views
 
-- (UIView *)buildWebToolbarWithWidth:(CGFloat)width andHeight:(CGFloat)height {
-    float toolbarHeight = 44.0;
-    self.webToolbar = [[[TpWebToolbar alloc] initWithFrame:CGRectMake(0.0, 0.0, width, toolbarHeight)] TP_AUTORELEASE];
-    self.webToolbar.tpDelegate = self;
-    return self.webToolbar;
+- (UIView *)buildWebNavigationBarWithWidth:(CGFloat)width height:(CGFloat)height {
+    CGRect frame = CGRectMake(0.0, 0.0, width, height);
+    self.webNavigationBar = [[[TpWebNavigationBar alloc] initWithFrame:frame touchpointName:self.currentTouchpointName] TP_AUTORELEASE];
+    
+    self.webNavigationBar.autoresizesSubviews = YES;
+    self.webNavigationBar.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    self.webNavigationBar.clearsContextBeforeDrawing = NO;
+    self.webNavigationBar.contentMode = UIViewContentModeScaleToFill;
+    self.webNavigationBar.hidden = NO;
+    self.webNavigationBar.multipleTouchEnabled = NO;
+    self.webNavigationBar.scalesPageToFit = NO;
+    self.webNavigationBar.userInteractionEnabled = YES;
+
+    self.webNavigationBar.tpDelegate = self;
+    return self.webNavigationBar;
 }
 
 /*
  * Setting up the view structure with code.
  * We do not use XIBs in order to reduce plugin integration complexity
  */
-- (UIView *)buildToolbarWithWidth:(CGFloat)width andHeight:(CGFloat)height {
+- (UIView *)buildNavigationBarWithWidth:(CGFloat)width height:(CGFloat)height {
     TPLog(@"buildViewWithWidth:%f height:%f", width, height);
     
-    float toolbarHeight = 44.0;
+    float navBarHeight = 44.0;
     
-    // Build toolbar
-    self.toolbar = [[[UIToolbar alloc] initWithFrame:CGRectMake(0.0, 0.0, width, toolbarHeight)] TP_AUTORELEASE];
-    self.toolbar.alpha = 1.000;
-    self.toolbar.autoresizesSubviews = YES;
-    self.toolbar.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleBottomMargin;
-    self.toolbar.barStyle = UIBarStyleDefault;
-    self.toolbar.clearsContextBeforeDrawing = NO;
-    self.toolbar.clipsToBounds = NO;
-    self.toolbar.contentMode = UIViewContentModeScaleToFill;
-    self.toolbar.frame = CGRectMake(0.0, 0.0, width, 44.0);
-    self.toolbar.hidden = NO;
-    self.toolbar.multipleTouchEnabled = NO;
-    self.toolbar.opaque = NO;
-    self.toolbar.tag = 0;
-    self.toolbar.userInteractionEnabled = YES;
+    // Build navigationBar
+    self.navigationBar = [[[UIToolbar alloc] initWithFrame:CGRectMake(0.0, 0.0, width, navBarHeight)] TP_AUTORELEASE];
+    self.navigationBar.alpha = 1.000;
+    self.navigationBar.autoresizesSubviews = YES;
+    self.navigationBar.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleBottomMargin;
+    self.navigationBar.barStyle = UIBarStyleDefault;
+    self.navigationBar.clearsContextBeforeDrawing = NO;
+    self.navigationBar.clipsToBounds = NO;
+    self.navigationBar.contentMode = UIViewContentModeScaleToFill;
+    self.navigationBar.frame = CGRectMake(0.0, 0.0, width, 44.0);
+    self.navigationBar.hidden = NO;
+    self.navigationBar.multipleTouchEnabled = NO;
+    self.navigationBar.opaque = NO;
+    self.navigationBar.tag = 0;
+    self.navigationBar.userInteractionEnabled = YES;
     
     self.backButton = [[[UIBarButtonItem alloc] init] TP_AUTORELEASE];
     self.backButton.imageInsets = UIEdgeInsetsZero;
@@ -133,16 +144,16 @@
     self.doneButton.tag = 0;
     self.doneButton.width = 0.000;
     self.doneButton.action = @selector(doneButtonPushed:);
-    return self.toolbar;
+    return self.navigationBar;
 }
 
-- (UIView *)buildViewWithToolbarAndWidth:(CGFloat)width height:(CGFloat)height {
+- (UIView *)buildViewWithNavigationBarAndWidth:(CGFloat)width height:(CGFloat)height {
     // Build offerwallContainer
     UIApplication *application = [UIApplication sharedApplication];
     float statusBarHeight = MIN(application.statusBarFrame.size.width, application.statusBarFrame.size.height);
-    float toolbarHeight = 44.0;
+    float navBarHeight = 44.0;
 
-    self.offerwallContainer = [[[UIWebView alloc] initWithFrame:CGRectMake(0.0, toolbarHeight, width, height-(toolbarHeight+statusBarHeight))] TP_AUTORELEASE];
+    self.offerwallContainer = [[[UIWebView alloc] initWithFrame:CGRectMake(0.0, navBarHeight, width, height-(navBarHeight +statusBarHeight))] TP_AUTORELEASE];
     
     self.offerwallContainer.alpha = 1.000;
     self.offerwallContainer.autoresizesSubviews = YES;
@@ -179,9 +190,13 @@
     self.mainView.tag = 0;
     self.mainView.userInteractionEnabled = YES;
 
-//    [self.mainView addSubview:[self buildWebToolbarWithWidth:width andHeight:height]];
-    [self.mainView addSubview:[self buildToolbarWithWidth:width andHeight:height]];
-    [self setupToolbarUsingBack:NO];
+#warning TODO: UPDATE TO ALWAYS USE WEB HEADER
+    if ([[BaseTrialpayManager sharedInstance] useWebNavigationBar]) {
+        [self.mainView addSubview:[self buildWebNavigationBarWithWidth:width height:navBarHeight]];
+    } else {
+        [self.mainView addSubview:[self buildNavigationBarWithWidth:width height:navBarHeight]];
+    }
+    [self setupNavigationBarUsingBack:NO];
     [self.mainView addSubview:self.offerwallContainer];
     
     return self.mainView;
@@ -216,13 +231,13 @@
         CGFloat width = screenRect.size.width;
         TPLog(@"height: %f, width: %f", height, width);
         // make sure that height<width (portrait mode properties)
-        if (width>height) {
+        if (width > height) {
             TPLog(@"Switch");
             CGFloat temp = width;
             width = height;
             height = temp;
         }
-        TPLog(@"height: %f, width: %f, %d", height, width, [[UIApplication sharedApplication] statusBarOrientation]);
+        TPLog(@"height: %f, width: %f, %d", height, width, (int)[[UIApplication sharedApplication] statusBarOrientation]);
         // change data to landscape if needed
         if (UIDeviceOrientationIsLandscape([[UIApplication sharedApplication] statusBarOrientation])) {
             TPLog(@"Landscape");
@@ -232,11 +247,11 @@
         }
         TPLog(@"height: %f, width: %f", height, width);
 
-        [self buildViewWithToolbarAndWidth:width height:height];
+        [self buildViewWithNavigationBarAndWidth:width height:height];
         [self addSubview:self.mainView];
         
         if (self.initialUrl) {
-            NSURL* url = [NSURL URLWithString:self.initialUrl];
+            NSURL *url = [NSURL URLWithString:self.initialUrl];
             NSURLRequest* request = [NSURLRequest requestWithURL:url];
             [self.offerwallContainer loadRequest:request];
             
@@ -260,7 +275,7 @@
 }
 
 #pragma mark - Loading offers
-- (void) loadOfferContainerWithRequest:(NSURLRequest *)request {
+- (void)loadOfferContainerWithRequest:(NSURLRequest *)request {
     TPLog(@"loadOfferContainerWithRequest: %@", request.URL.absoluteString);
     
     self.offerContainer = [[[UIWebView alloc] initWithFrame:self.offerwallContainer.frame] TP_AUTORELEASE];
@@ -293,49 +308,57 @@
                     completion:nil];
     
     self.webViewContainer = self.offerContainer;
-    [self setupToolbarUsingBack:YES];
+    [self setupNavigationBarUsingBack:YES];
 }
 
-- (void)setupToolbarUsingBack:(BOOL)useBack {
-    if (self.toolbar) {
+- (void)setupNavigationBarUsingBack:(BOOL)useBack {
+    if (![[BaseTrialpayManager sharedInstance] useWebNavigationBar]) {
         if (useBack) {
-            self.toolbar.items = [NSArray arrayWithObjects:self.backButton, self.flexibleSpaceArea, self.doneButton, nil];
+            self.navigationBar.items = [NSArray arrayWithObjects:self.backButton, self.flexibleSpaceArea, self.doneButton, nil];
         } else {
-            self.toolbar.items = [NSArray arrayWithObjects:self.flexibleSpaceArea, self.doneButton, nil];
+            self.navigationBar.items = [NSArray arrayWithObjects:self.flexibleSpaceArea, self.doneButton, nil];
         }
     } else {
         if (useBack) {
-            [self.webToolbar enableBackButton];
+            //[self.webNavigationBar enableBackButton];
         } else {
-            [self.webToolbar disableBackButton];
+            //[self.webNavigationBar disableBackButton];
         }
     }
 }
 
-- (void) unloadOfferContainer {
+- (void)unloadOfferContainer {
     TPLog(@"unloadOfferContainer");
     self.webViewContainer = self.offerwallContainer;
     [self.offerContainer removeFromSuperview];
     self.offerContainer = nil;
-    [self setupToolbarUsingBack:NO];
+    [self setupNavigationBarUsingBack:NO];
 }
 
 #pragma mark - Indicator on Navigation Bar
 - (void) showLoadingIndicator {
-    if (nil == self.loadingIndicator) {
-        CGRect indicatorBounds = CGRectMake(self.offerwallContainer.frame.size.width/4, 12, self.offerwallContainer.frame.size.width/2, 24);
-        self.loadingIndicator = [[[UIActivityIndicatorView alloc] initWithFrame:indicatorBounds] TP_AUTORELEASE];
-        self.loadingIndicator.activityIndicatorViewStyle = UIActivityIndicatorViewStyleWhite;
-        self.loadingIndicator.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-        [self.loadingIndicator startAnimating];
-        [self.mainView addSubview:self.loadingIndicator];
+    if ([[BaseTrialpayManager sharedInstance] useWebNavigationBar]) {
+        [self.webNavigationBar showSpinner];
+    } else {
+        if (nil == self.loadingIndicator) {
+            CGRect indicatorBounds = CGRectMake(self.offerwallContainer.frame.size.width/4, 12, self.offerwallContainer.frame.size.width/2, 24);
+            self.loadingIndicator = [[[UIActivityIndicatorView alloc] initWithFrame:indicatorBounds] TP_AUTORELEASE];
+            self.loadingIndicator.activityIndicatorViewStyle = UIActivityIndicatorViewStyleWhite;
+            self.loadingIndicator.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+            [self.loadingIndicator startAnimating];
+            [self.mainView addSubview:self.loadingIndicator];
+        }
     }
 }
 
 - (void) hideLoadingIndicator {
-    if (nil != self.loadingIndicator) {
-        [self.loadingIndicator removeFromSuperview];
-        self.loadingIndicator = nil;
+    if ([[BaseTrialpayManager sharedInstance] useWebNavigationBar]) {
+        [self.webNavigationBar hideSpinner];
+    } else {
+        if (nil != self.loadingIndicator) {
+            [self.loadingIndicator removeFromSuperview];
+            self.loadingIndicator = nil;
+        }
     }
 }
 
@@ -344,7 +367,7 @@
  */
 - (BOOL)webView:(UIWebView *)webView shouldStartLoadWithRequest:(NSURLRequest *)request navigationType:(UIWebViewNavigationType)navigationType {
     self.currentRequest = request;
-    TPLog(@"webView:%@ shouldStartLoadWithRequest:%@ navigationType:%d", [self getWebViewName:webView], [[request URL] absoluteString], navigationType);
+    TPLog(@"webView:%@ shouldStartLoadWithRequest:%@ navigationType:%d", [self getWebViewName:webView], [[request URL] absoluteString], (int)navigationType);
     
     if ([webView isEqual:self.offerwallContainer]) {
         if ([request.URL.scheme hasPrefix:@"http"] || [request.URL.scheme hasPrefix:@"https"]) {
@@ -382,6 +405,24 @@
         // in this scenario we will just skip loading
         return NO;
     }
+
+    // handle the special protocol "tp://"
+    if ([request.URL.scheme hasPrefix:@"tp"]) {
+        if ([request.URL.host isEqualToString:@"navbar_js"]) {
+            // it's a command that the OfferWallContainer or the OfferContainer sent to the navbar
+            // (in this case the request has the format "tp://navbar_js/[js_method_name]([param_a], [param_b]...)", e.g. "tp://navbar_js/showSpinner()")
+            NSArray *pathComponents = request.URL.pathComponents;
+
+            // make sure that path components contain only two elements: "/" and command
+            if (pathComponents.count == 2) {
+                // extract a JavaScript command and ask the navbar to execute it
+                NSString *jsCommand = [TpUrlManager URLDecodeQueryString:[pathComponents objectAtIndex:1]];
+                [self.webNavigationBar executeCommand:jsCommand];
+            }
+            return NO;
+        }
+    }
+
     // if the special protocol starts with "tpbowhttp(s)", remove tpbow prefix. it was needed only in order to skip the offerContainer
     NSURL *url = request.URL;
     if ([request.URL.scheme hasPrefix:@"tpbow"]) {
@@ -458,13 +499,13 @@
     [self hideLoadingIndicator];
     if (self.webViewContainer.canGoBack) {
         [self.webViewContainer goBack];
-    } else if ([self.webViewContainer isEqual:self.offerContainer]) {
-        [self unloadOfferContainer];
+    } else {
+        [self doneButtonPushed:sender];
     }
 }
 
 #pragma mark - Alert view delegate (connection issues)
-- (void) alertView:(UIAlertView *)alertView clickedButtonAtIndex:(NSInteger)buttonIndex {
+- (void)alertView:(UIAlertView *)alertView clickedButtonAtIndex:(NSInteger)buttonIndex {
     switch (alertView.tag) {
         case 1:
         {
@@ -476,7 +517,7 @@
                     } else {
                         if ([self.webViewContainer isEqual:self.offerwallContainer] ) {
                             NSURL *url = [NSURL URLWithString:self.initialUrl];
-                            NSURLRequest* request = [NSURLRequest requestWithURL:url];
+                            NSURLRequest *request = [NSURLRequest requestWithURL:url];
                             [self.offerwallContainer loadRequest:request];
                         } else {
                             [self doneButtonPushed:nil]; //TODO: this needs to be fixed - reload does not work for the initial URL
@@ -497,7 +538,7 @@
     }
 }
 
-- (BOOL)loadOfferwallForTouchpoint:(NSString *)touchpointName {
+- (BOOL)loadWebViewTouchpoint:(NSString *)touchpointName {
     TPLogEnter;
     self.currentTouchpointName = touchpointName;
     NSString *url = [[TpUrlManager sharedInstance] offerwallUrlForTouchpoint:touchpointName];
@@ -511,35 +552,16 @@
     return true;
 }
 
-- (BOOL)loadDealspotForTouchpoint:(NSString *)touchpointName withUrl:(NSString *)dealspotUrl {
-    TPLogEnter;
-    self.currentTouchpointName = touchpointName;
-    TPLog(@"Url: %@", dealspotUrl);
-    if (dealspotUrl == nil) {
-        TPCustomerLog(@"Unable to get dealspot URL fo {url}", @"Unable to get dealspot URL fo %@", touchpointName);
-        return false;
-    }
-    [self unloadOfferContainer];
-    [self loadRequest:dealspotUrl];
-    return true;
-}
-
-- (void)goToOfferwall {
-    [self unloadOfferContainer];
-}
-
 // Respond to tp://close - call the close offerwall functionality
-- (void) navClose:(NSURL*)url {
+- (void) navClose:(NSString *)dummy {
     [self.delegate tpWebView:self donePushed:self];
 }
 
 //tp://up - call the "up" functionality - if the user is in the offer scope, go back to the offerwall, otherwise close the offerwall
-- (void) navUp:(NSURL*)url {
+- (void) navUp:(NSString *)dummy {
     [self hideLoadingIndicator];
-    // go back, go up, than close
-    if (self.webViewContainer.canGoBack) {
-        [self.webViewContainer goBack];
-    } else if ([self.webViewContainer isEqual:self.offerContainer]) {
+    // go up, than close
+    if ([self.webViewContainer isEqual:self.offerContainer]) {
         [self unloadOfferContainer];
     } else {
         [self.delegate tpWebView:self donePushed:self];
@@ -549,60 +571,63 @@
 }
 
 //tp://back - browser-back
-- (void) navBack:(NSURL*)url {
+- (void) navBack:(NSString *)dummy {
     [self backButtonPushed:self];
 }
 
 //tp://reload - reload the offerwall (clear browsing history)
-- (void) navReload:(NSURL*)url {
+- (void) navReload:(NSString *)dummy {
     // well, lets reload the current webview, resetting the cache
     [TpUrlManager clearHTTPCache];
-    [self loadOfferwallForTouchpoint:self.currentTouchpointName];
+    [self loadWebViewTouchpoint:self.currentTouchpointName];
 }
 
 //tp://refresh - reload the current page
-- (void) navRefresh:(NSURL*)url {
+- (void) navRefresh:(NSString *)dummy {
     [self.webViewContainer loadRequest:self.currentRequest];
 }
 
 //tp://offerwall/[url] - open [url] in the OfferWallContainer. being used with the protocol tp://offerwall/http://www.google.com
-- (void) navOfferwall:(NSURL*)url {
-    NSURL *owURL = [TpUrlManager getURLFromRelativePath:url];
-    NSURLRequest* request = [NSURLRequest requestWithURL:owURL];
-    TPLog(@"open owURL %@", owURL);
-    [self goToOfferwall];
-    [self.webViewContainer loadRequest:request];
+- (void) navOfferwall:(NSString *)urlString {
+    TPLog(@"open owURL %@", urlString);
+    if ([self.webViewContainer isEqual:self.offerContainer]) {
+        [self unloadOfferContainer];
+    }
+    // webViewContainer is now the offerwallContainer
+    [self.webViewContainer loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:urlString]]];
 }
 
 //tp://offer/[url] - open [url] in the Offer. being used with the protocol tp://offerwall/http://www.google.com
-- (void) navOffer:(NSURL*)url {
-    NSURL *offerURL = [TpUrlManager getURLFromRelativePath:url];
-    NSURLRequest* request = [NSURLRequest requestWithURL:offerURL];
-    TPLog(@"open offerURL %@", offerURL);
-    [self goToOfferwall];
-    [self unloadOfferContainer];
-    [self loadOfferContainerWithRequest:request];
+- (void) navOffer:(NSString *)urlString {
+    TPLog(@"open offerURL %@", urlString);
+    if ([self.webViewContainer isEqual:self.offerContainer]) {
+        // webViewContainer is now the offerContainer
+        [self.webViewContainer loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:urlString]]];
+    } else {
+        [self loadOfferContainerWithRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:urlString]]];
+    }
 }
 
 //tp://changeHeaderHeight/[height] - set the header height to [height] (pixel density = 1)
-- (void) navChangeHeaderHeight:(NSURL*)url {
-    int height = [[url.pathComponents objectAtIndex:1] intValue];
+- (void) navChangeHeaderHeight:(NSString *)heightString {
+    int height = [heightString intValue];
     TPLog(@"New height is %d", height);
 
-    // review both heights of webview & toolbar
+    
+    CGRect navbarFrame = self.webNavigationBar.frame;
+    CGFloat offset = height - navbarFrame.size.height;
+    navbarFrame.size.height += offset;
+    TPLog(@"web navigationBar %@", NSStringFromCGRect(navbarFrame));
+    self.webNavigationBar.frame = navbarFrame;
+    TPLog(@"web navigationBar %@", NSStringFromCGRect(self.webNavigationBar.frame));
+    
     CGRect webFrame = self.webViewContainer.frame;
-    CGRect tbFrame = self.webToolbar.frame;
-
-    CGFloat offset = tbFrame.size.height - height;
-    webFrame.size.height += offset;
-    webFrame.origin.y -= offset;
-    tbFrame.size.height = height;
-
-    self.webViewContainer.scrollView.frame = webFrame;
-    self.webToolbar.scrollView.frame = tbFrame;
-
+    webFrame.origin = CGPointMake(webFrame.origin.x, webFrame.origin.y + offset);
+    webFrame.size.height -= offset;
+    TPLog(@"web container frame %@", NSStringFromCGRect(webFrame));
+    self.webViewContainer.frame = webFrame;
     TPLog(@"web container frame %@", NSStringFromCGRect(self.webViewContainer.frame));
-    TPLog(@"web toolbar %@", NSStringFromCGRect(self.webToolbar.frame));
+    
 }
 
 // stop webviews clearing its delegates first

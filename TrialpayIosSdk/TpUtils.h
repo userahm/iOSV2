@@ -66,10 +66,11 @@ NSLog(@"[TPLOG] [%50.50s] %@", \
 
 + (void)verboseLogging:(BOOL)verbose;
 
-+ (NSString*) appVersion;
-+ (NSString*) idfa;
-+ (NSString*) macAddress;
-+ (NSString*) sha1:(NSString*)input;
++ (NSString *)appVersion;
++ (NSString *)idfa;
++ (NSString *)macAddress;
++ (NSString *)sha1:(NSString*)input;
 
-+ (NSString *) genderCodeForValue:(Gender)gender;
++ (NSString *)genderCodeForValue:(Gender)gender;
++ (Gender)genderValueForCode:(NSString *)genderStr;
 @end

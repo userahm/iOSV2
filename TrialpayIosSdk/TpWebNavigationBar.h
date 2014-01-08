@@ -1,15 +1,21 @@
 //
-// Created by Daniel Togni on 10/14/13.
+// Created by Trialpay, Inc. on 10/14/13.
 // Copyright (c) 2013 TrialPay Inc. All rights reserved.
 //
 
 
 #import <Foundation/Foundation.h>
-#import "TpToolbarDelegate.h"
+#import "TpNavigationBarDelegate.h"
 
 
-@interface TpWebToolbar : UIWebView <UIWebViewDelegate>
-@property (nonatomic, strong) id<TpToolbarDelegate> tpDelegate;
+@interface TpWebNavigationBar : UIWebView <UIWebViewDelegate>
+
+@property (nonatomic, strong) id<TpNavigationBarDelegate> tpDelegate;
+@property (nonatomic, assign) BOOL isReady;
+
+- (id)initWithFrame:(CGRect)frame touchpointName:(NSString *)touchpointName;
+
+- (void)executeCommand:(NSString *)jsCommand;
 
 - (void)showSpinner;
 
@@ -30,4 +36,5 @@
 - (void)switchToOfferwallMode;
 
 - (void)switchToOfferMode;
+
 @end

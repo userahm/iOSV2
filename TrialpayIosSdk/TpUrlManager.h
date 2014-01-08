@@ -1,5 +1,5 @@
 //
-// Created by Daniel Togni on 9/27/13.
+// Created by Trialpay, Inc. on 9/27/13.
 // Copyright (c) 2013 TrialPay, Inc. All Rights Reserved.
 //
 
@@ -9,14 +9,14 @@ extern NSString *kTPKeyCustomDispatchPrefixUrl;
 extern NSString *kTPKeyCustomBalancePrefixUrl;
 
 typedef enum {
-    TPOfferwallDispatchPrefixUrl,
-    TPBalancePrefixUrl,
-    TPDealspotTouchpointPrefixUrl,
-    TPDealspotGeoPrefixUrl,
-    TPUserPrefixUrl,
-    TPSrcPrefixUrl,
-    TPDeaslpotAvailabilityPrefixUrl,
-    TPNavigationBarPrefixUrl,
+    TPOfferwallDispatchPrefixUrl = 1,
+    TPBalancePrefixUrl = 2,
+    TPDealspotTouchpointPrefixUrl = 3,
+    TPDealspotGeoPrefixUrl = 4,
+    TPUserPrefixUrl = 5,
+    TPSrcPrefixUrl = 6,
+    TPDeaslpotAvailabilityPrefixUrl = 7,
+    TPNavigationBarPrefixUrl = 8,
 } TPPrefixUrl;
 
 @interface TpUrlManager : NSObject
@@ -24,11 +24,13 @@ typedef enum {
 
 + (void)clearHTTPCache;
 
-+ (NSString *)URLEncodeString:(NSString *)string;
-+ (NSString *)URLDecodeString:(NSString *)string;
++ (NSString *)URLEncodeQueryString:(NSString *)string;
++ (NSString *)URLDecodeQueryString:(NSString *)string;
 + (NSURL *)getURLFromRelativePath:(NSURL *)url;
 
 + (NSString *)getPrefixUrl:(TPPrefixUrl)url;
+
++ (NSString *)navigationPathForTouchpoint:(NSString *)touchpointName;
 
 + (NSString *)balancePathWithVic:(NSString *)vic andSid:(NSString *)sid;
 + (NSString *)balancePathWithVic:(NSString *)vic andSid:(NSString *)sid usingBalanceInfo:(NSDictionary *)balanceInfo;

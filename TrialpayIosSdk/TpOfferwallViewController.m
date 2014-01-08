@@ -8,30 +8,18 @@
 #import "TpOfferwallViewController.h"
 #import "TpUtils.h"
 #import "TpArcSupport.h"
+#import "BaseTrialpayManager.h"
 
 @interface TpOfferwallViewController ()
 @end
 
 @implementation TpOfferwallViewController {
-    TPViewControllerMode _mode;
-    NSString *_dealspotUrl;
 }
 
 #pragma mark - Init with touchpoint name
-- (id)initOfferwallWithTouchpointName:(NSString *)touchpointName {
+- (id)initWithTouchpointName:(NSString *)touchpointName {
     TPLog(@"initWithTouchpointName %@", touchpointName);
     self = [self init];
-    _mode = TPModeOfferwall;
-    _touchpointName = touchpointName;
-
-    return self;
-}
-
-- (id)initDealspotWithTouchpointName:(NSString *)touchpointName withUrl:(NSString *)dealspotUrl {
-    TPLog(@"initWithTouchpointName %@", touchpointName);
-    self = [self init];
-    _mode = TPModeDealspot;
-    _dealspotUrl = dealspotUrl;
     _touchpointName = touchpointName;
 
     return self;
@@ -60,23 +48,14 @@
     TPLogEnter;
 
     [super viewDidLoad];
-    switch (_mode) {
-        case TPModeOfferwall:
-            [self.tpWebView loadOfferwallForTouchpoint:self.touchpointName];
-            break;
-        case TPModeDealspot:
-            [self.tpWebView loadDealspotForTouchpoint:self.touchpointName withUrl:_dealspotUrl];
-            break;
-        case TPModeUnknown:
-            break;
-    }
+    [self.tpWebView loadWebViewTouchpoint:self.touchpointName];
 }
 
 #pragma mark - Done button pushed - for done button selector
 - (void)tpWebView:(TpWebView *)tpWebView donePushed:(id)sender {
     TPLogEnter;
     [self dismissViewControllerAnimated:YES completion:nil];
-    [self.delegate tpOfferwallViewController:self close:sender];
+    [self.delegate tpOfferwallViewController:self close:sender forTouchpointName:_touchpointName];
     self.tpWebView.delegate = nil; // release delegate on close
 }
 

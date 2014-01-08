@@ -1,5 +1,5 @@
 //
-// Created by Daniel Togni on 9/27/13.
+// Created by Trialpay, Inc. on 9/27/13.
 // Copyright (c) 2013 TrialPay, Inc. All Rights Reserved.
 //
 
@@ -10,6 +10,7 @@ extern NSString *kTPKeyUserCreationTime;
 extern NSString *kTPKeyVisitTimestamps;
 extern NSString *kTPKeyVisitLengths;
 extern NSString *kTPKeyTouchpointNames;
+extern NSString *kTPKeyDealspotURLs;
 extern NSString *kTPKeyBalances;
 extern NSString *kTPKeyVICs;
 extern NSString *kTPKeyAge;
@@ -21,3 +22,4 @@ extern NSString *kTPKeyDollarAmount;
 extern NSString *kTPKeyVCAmount;
 extern NSString *kTPSid;
 extern NSString *kTPKeySecondsValid;
+extern NSString *kTPKeyUseWebNavigationBar;
