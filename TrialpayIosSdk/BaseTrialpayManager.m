@@ -103,10 +103,12 @@ NSMutableDictionary *customParams = nil;
 }
 
 - (void)startListeningToAppStateNotifications {
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(applicationDidBecomeActiveNotification) name:UIApplicationDidBecomeActiveNotification object:NULL];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector
-    (applicationDidEnterBackgroundNotification) name:UIApplicationWillTerminateNotification object:NULL];
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(applicationWillTerminateNotification) name:UIApplicationDidEnterBackgroundNotification object:NULL];
+    (applicationDidBecomeActiveNotification) name:UIApplicationDidBecomeActiveNotification object:NULL];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector
+    (applicationDidEnterBackgroundNotification) name:UIApplicationDidEnterBackgroundNotification object:NULL];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector
+    (applicationWillTerminateNotification) name:UIApplicationWillTerminateNotification object:NULL];
 }
 
 + (BaseTrialpayManager *)sharedInstance {
@@ -212,7 +214,7 @@ NSMutableDictionary *customParams = nil;
 
 #pragma mark - Get SDK Version
 + (NSString*)sdkVersion {
-    return @"ios.2.78286";
+    return @"ios.2.90071";
 }
 
 #pragma mark - BaseTrialpayManager getter/setter

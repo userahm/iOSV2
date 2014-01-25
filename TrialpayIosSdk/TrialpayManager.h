@@ -27,61 +27,148 @@
 
      @page SampleIntegration Sample Integration
 
-     @code
+ 
 
-... On your view controller
-
-#import "TrialpayManager.h"
-
+In your Interface Builder
+ 1. Create a UIButton that will allow to open the Offer Wall
+ 2. Create a TpDealspotView element
+ 
+In your view controller header
+@code
+ 
 ...
+#import "TrialpayManager.h"
+...
+@interface MyViewController : UIViewController <TrialpayManagerDelegate>
+...
+- (IBAction)openOfferwallWithSender:(id)sender;
+@property (weak, nonatomic) IBOutlet TpDealspotView *dealspotView;
+ 
+@endcode
 
+In your view controller module
+@code
+ 
+...
 @implementation MyViewController
 - (void)viewDidLoad
 {
     [super viewDidLoad];
+    // Load the Trialpay Manager object
     TrialpayManager* trialpayManager = [TrialpayManager getInstance];
-    [trialpayManager setSid:@"SomeDeviceUserId"];
-    [trialpayManager registerVic:@"<INTEGRATION_CODE_FROM_TRIALPAY_PRODUCTS_PAGE>" withTouchpoint:@""];
-//    [trialpayManager initiateBalanceChecks]; // uncomment if using Balance API (See section 3.6.2), should be called only once...
-    [trialpayManager setDelegate:self]; // get responses from Trialpay
+    // Set the user id. Not required if you are using Balance API
+    [trialpayManager setSid:@"<UNIQUE_USER_ID>"];
+    // Register the Offer Wall touchpoint
+    [trialpayManager registerVic:@"<OFFERWALL_INTEGRATION_CODE_FROM_TRIALPAY>" withTouchpoint:@"<YOUR_OFFERWALL_TOUCHPOINT_NAME>"];
+    // Set the DealSpot touchpoint
+    [trialpayManager registerVic:@"<DEALSPOT_INTEGRATION_CODE_FROM_TRIALPAY>" withTouchpoint:@"<YOUR_DEALSPOT_TOUCHPOINT_NAME>"];
+    [self.dealspotView setTouchpointName:@"dealspot"];
+    // Initiate Balance API checks. Not needed if you accept callbacks to your server
+    [trialpayManager initiateBalanceChecks];
+    // Get responses from Trialpay
+    [trialpayManager setDelegate:self];
 }
 
-// Associate this IBAction with the button that triggers the offerwall
-- (IBAction)openOfferwallWithSender:(id)sender {
+// Associate this IBAction with the button that triggers the Offer Wall
+- (IBAction)openOfferwallWithSender:(id)sender
+{
     TrialpayManager *trialpayManager = [TrialpayManager getInstance];
-    [trialpayManager openOfferwallForTouchpoint:@"openOfferwall"];
+    [trialpayManager openOfferwallForTouchpoint:@"<YOUR_OFFERWALL_TOUCHPOINT_NAME>"];
 }
 
-// Listen to Trialpay Actions
-- (void)trialpayManager:(TrialpayManager *)trialpayManager withAction:(TPMessageAction)action {
-  NSLog(@"Got a Trialpay event");
-  switch (action) {
-    case TPOfferwallCloseAction:
-      NSLog(@"Trialpay Offerwall is now closed");
-      break;
-    case TPBalanceUpdateAction: // uncomment if using Balance API (See section 3.6.2)
-//      int balanceToAdd = [trialpayManager withdrawBalanceForTouchpoint:MY_TOUCHPOINT];
-//      NSLog(@"User was credited %d coins!", balanceToAdd);
-      break;
-  }
+// Listen to TrialPay's balance updates if you're using the Balance API
+- (void)trialpayManager:(TrialpayManager *)trialpayManager balanceWasUpdatedForTouchpoint:(NSString*)touchpointName
+{
+  int balanceToAdd = [trialpayManager withdrawBalanceForTouchpoint:touchpointName];
+  // TODO: Add the balanceToAdd amount to the user's credits
 }
 
+// Optional: Listen to TrialPay's Close event
+- (void)trialpayManager:(TrialpayManager *)trialpayManager offerwallDidCloseForTouchpoint:(NSString*)touchpointName 
+{
+  // TODO: Implement
+}
+ 
+ 
 ...
 
 @end
 
 @endcode
 
+@page AdvancedIntegration Advanced Integration
+Passing the following values will improve TrialPay's monetization for your app
+ 
+Demographic information
+---
+Call this code when the app loads the user information
+@code
+ [[TrialpayManager getInstance] setAge:userAge];
+ [[TrialpayManager getInstance] setGender:userGender];
+@endcode
+
+User's progress
+---
+Every time the user goes into a new level, call the method below.
+@code
+ [[TrialpayManager getInstance] updateLevel:level];
+@endcode
+For this scope, level is the numerical ordered value that correlates with the experience that the user gained in the game.
+Not sure what the value should be? Ask us.
+ 
+Virtual Currency gaining
+---
+When users are granted with virtual currency as a result of a purchse, offer based earning or a gifting event in the app, call the following method:
+@code
+ [[TrialpayManager getInstance] updateVcPurchaseInfoForTouchpoint:@"<TOUCHPOINT_FOR_VC>" dollarAmount:dollarAmount vcAmount:vcAmount];
+@endcode
+Note:
+ 1. Pass only dollar amount
+ 2. If a user gets VC for free, pass 0 as the dollar amount
+ 3. Call this method even when the credit event was done through TrialPay:
+@code
+// Listen to Trialpay' balance updates if you're using the Balance API
+- (void)trialpayManager:(TrialpayManager *)trialpayManager balanceWasUpdatedForTouchpoint:(NSString*)touchpointName {
+  int balanceToAdd = [trialpayManager withdrawBalanceForTouchpoint:touchpointName];
+  [trialpayManager updateVcPurchaseInfoForTouchpoint:touchpointName dollarAmount:0 vcAmount:balanceToAdd];
+  // TODO: Add the balanceToAdd amount to the user's credits
+}
+@endcode
+ 
+Update current Virtual Currency state
+---
+Call this method with the same value that would appear on the screen for the user.
+@code
+ [[TrialpayManager getInstance] updateVcBalanceForTouchpoint:@"<TOUCHPOINT_FOR_VC>" vcAmount:vcAmount];
+@endcode
+Note:
+ 1. The vcAmount is not an incremental change - it is the current Virtual Currency value. It is recommended to call it on the same method that updates the value on the screen.
+ 2. Calling updateVcPurchaseInfoForTouchpoint:dollarAmount:vcAmount: does not update the balance.
+
+Custom Parameters
+---
+If you're using the callback method and created a custom parameter on the merchant panel, use the code below in order to set the custom parameter:
+@code
+// Associate this IBAction with the button that triggers the Offer Wall
+- (IBAction)openOfferwallWithSender:(id)sender {
+  TrialpayManager *trialpayManager = [TrialpayManager getInstance];
+  [trialpayManager setCustomParamValue:@"custom_param_value" forName:@"my_custom_parameter";];
+  [trialpayManager openOfferwallForTouchpoint:@"<YOUR_OFFERWALL_TOUCHPOINT_NAME>"];
+}
+@endcode
+Note: the custom parameter value is being reset after opening the Offer Wall
  */
+
+
 
 /*!
      This is the class used to perform all SDK tasks.
 
      Terminology:
-     - <b>Device user</b>: the user that is using the device.
+     - <b>User</b>: the user that is using the app on the device.
      - <b>VIC</b>: the campaign identification, also called "Integration Code". Find it on your Merchant page/Products, the item "Get integration code" under every campaign.
      - <b>SID</b>: an unique device user identification. Its preferably provided by you, but can be generated by Trialpay.
-     - <b>Touchpoint</b>: identifies the button that was clicked to open the Offerwall - the name is your choice.
+     - <b>Touchpoint</b>: identifies the button that was clicked to open the Offer Wall - the name is your choice.
 
 
      @see <a href="http://help.trialpay.com/mobile/ios-sdk">Integrating the TrialPay SDK into an iOS app</a>
@@ -123,7 +210,7 @@
 - (void)registerVic:(NSString *)vic withTouchpoint:(NSString *)touchpointName;
 
 /*!
-    Open the Trialpay Offerwall for a given touchpoint.
+    Open the Trialpay Offer Wall for a given touchpoint.
     @param touchpointName The touchpoint.
 */
 - (void)openOfferwallForTouchpoint:(NSString *)touchpointName;
@@ -163,7 +250,7 @@
 /*!
     Set the gender of the device user. Affects all touchpoints.
     This method should be called on device user registration or during initialization.
-    @param gender The gender of the device user.
+    @param gender The gender of the device user. Values can be Female, Male or Unknown
  */
 - (void)setGender:(Gender)gender;
 /*!
@@ -205,7 +292,7 @@
 - (void)updateVcBalanceForTouchpoint:(NSString *)touchpointName vcAmount:(int)vcAmount;
 
 /*!
-    Delegate for Offerwall close events and Balance update events, See TrialpayManagerDelegate.
+    Delegate for Offer Wall close events and Balance update events, See TrialpayManagerDelegate.
     @include updateVcBalanceForTouchpoint.m
 */
 @property (strong, nonatomic) id<TrialpayManagerDelegate> delegate;

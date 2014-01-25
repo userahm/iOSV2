@@ -21,7 +21,7 @@ typedef void (^TPDelegateBlock)(TrialpayManager*);
 */
 typedef enum {
     TPUnknownAction=0,        /*! Unknown action */
-    TPOfferwallOpenAction=1, /*! The Trialpay offerwall was closed */
+    TPOfferwallOpenAction=1, /*! The Trialpay offerwall was opened */
     TPOfferwallCloseAction=2, /*! The Trialpay offerwall was closed */
     TPBalanceUpdateAction=3,  /*! The device user balance was updated, check TrialpayManager::withdrawBalanceForTouchpoint:*/
 } TPMessageAction;

@@ -57,13 +57,6 @@
     return self;
 }
 
-/*
-    Initializes the TrialPay Dealspot object with a reference to the parent view controller that contains the
-    TrialPay Dealspot object. The segue identifier should be passed in as well so that on clicking the Trialpay Dealspot
-    touchpoint, the user is taken through the correct Storyboard flow.
-    
-    @param parentView View Controller that the TrialPay Dealspot element should be added into
- */
 - (id)initWithFrame:(CGRect)aRect forTouchpoint:(NSString *)touchpointName {
     if ((self = [self initWithFrame:aRect])) {
         [self setTouchpointName:touchpointName];
@@ -102,10 +95,10 @@
  */
 - (BOOL)webView:(UIWebView *)webView shouldStartLoadWithRequest:(NSURLRequest *)request navigationType:(UIWebViewNavigationType)navigationType {
     TPLog(@"DS URL %@", request.URL);
-	if ([request.URL.scheme hasPrefix:@"http"]) {
+    if ([request.URL.scheme hasPrefix:@"http"]) {
         return YES;
     }
-    
+
     NSURL *url = request.URL;
     if ([url.absoluteString hasPrefix:@"trialpay://dsresizefull:"]) {
         [self hideDealspotIcon];
