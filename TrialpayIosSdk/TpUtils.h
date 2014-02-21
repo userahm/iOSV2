@@ -74,3 +74,9 @@ NSLog(@"[TPLOG] [%50.50s] %@", \
 + (NSString *)genderCodeForValue:(Gender)gender;
 + (Gender)genderValueForCode:(NSString *)genderStr;
 @end
+
+@interface TpUserAgent : NSObject
++ (TpUserAgent *)sharedInstance;
+- (void)populateUserAgent;
+@property (strong, nonatomic) NSString *userAgent;
+@end

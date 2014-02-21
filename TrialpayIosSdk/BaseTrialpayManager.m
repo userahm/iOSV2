@@ -10,9 +10,13 @@
 #import "TpArcSupport.h"
 #import "TpDealspotView.h"
 #import "TrialpayManager.h"
+#import "TpUtils.h"
+#import "TpUrlManager.h"
 
 // how many UNIX timestamps for the customer's last sessions will be stored
 #define TP_MAX_VISIT_TIMESTAMPS 5
+// defaut validity_time for availability results, in seconds
+#define TP_AVAILABILITY_DEFAULT_VALIDITY_TIME 86400
 
 NSString *TPOfferwallOpenActionString  = @"offerwall_open";
 NSString *TPOfferwallCloseActionString  = @"offerwall_close";
@@ -20,6 +24,9 @@ NSString *TPBalanceUpdateActionString  = @"balance_update";
 
 @interface BaseTrialpayManager ()
 - (int)checkBalance;
+- (int)checkInterstitialAvailabilityForTouchpoint:(NSString *)touchpointName;
+- (void)stopAvailabilityCheckForTouchpoint:(NSString *)touchpointName;
+- (int)interstitialAvailabilityErrorTimeForTouchpoint:(NSString *)touchpointName;
 
 @property (assign, nonatomic) __block BOOL isShowingOfferwall; // will be modified by a block
 @property (nonatomic) NSTimeInterval userSessionTimeout; // To allow change on value
@@ -33,7 +40,7 @@ NSString *TPBalanceUpdateActionString  = @"balance_update";
     TPLogEnter;
     @autoreleasepool {
         int defaultSecondsValid = 10;
-        int secondsValid = defaultSecondsValid;// start with 5s
+        int secondsValid = defaultSecondsValid; // start with default
         while (!self.isCancelled) {
 #if defined(__TRIALPAY_USE_EXCEPTIONS)
             @try {
@@ -60,8 +67,38 @@ NSString *TPBalanceUpdateActionString  = @"balance_update";
 }
 @end
 
+@interface TpAvailabilityCheckOperation : NSOperation
+@property (strong, nonatomic) NSString *touchpointName;
+@end
+
+@implementation TpAvailabilityCheckOperation
+- (void) main {
+    @autoreleasepool {
+        int secondsValid = TP_AVAILABILITY_DEFAULT_VALIDITY_TIME; // start with default
+        while (!self.isCancelled) {
+#if defined(__TRIALPAY_USE_EXCEPTIONS)
+            @try {
+#endif
+                TPLog(@"Loop availability check for touchpoint %@", self.touchpointName);
+                secondsValid = [[BaseTrialpayManager sharedInstance] checkInterstitialAvailabilityForTouchpoint:self.touchpointName];
+                if (secondsValid <= 0) {
+                    secondsValid = TP_AVAILABILITY_DEFAULT_VALIDITY_TIME;
+                }
+                TPLog(@"availabilityCheckOperation for touchpoint %@ before wait for %d", self.touchpointName, secondsValid);
+                [NSThread sleepForTimeInterval:secondsValid];
+#if defined(__TRIALPAY_USE_EXCEPTIONS)
+            }
+            @catch (NSException *exception) {
+                TPLog(@"%@", [exception callStackSymbols]);
+            }
+#endif
+        }
+    }
+}
+@end
+
 @implementation BaseTrialpayManager {
-    NSOperationQueue *_balanceQueue;
+    NSOperationQueue *_tpOperationQueue;
     NSDate *_lastBackground;
     NSDate *_lastForeground;
     NSMutableDictionary *_openDealspotViews;
@@ -75,10 +112,11 @@ BaseTrialpayManager *__baseTrialpayManager;
     if ((self = [super init])) {
         _isShowingOfferwall = NO;
         __baseTrialpayManager = self;
-
+        _useWebNavigationBar = YES;
+        
         // queue is needed so operation runs on background
-        _balanceQueue = [[NSOperationQueue alloc] init];
-        _balanceQueue.name = @"Balance Queue";
+        _tpOperationQueue = [[NSOperationQueue alloc] init];
+        _tpOperationQueue.name = @"TP Operation Queue";
 
         // We may be called after foreground, so lets force the call,
         // It may run right after this (forced) call when the application:didFinishLaunchingWithOptions: finishes
@@ -93,12 +131,16 @@ BaseTrialpayManager *__baseTrialpayManager;
 NSMutableDictionary *customParams = nil;
 
 - (void)dealloc {
-    [_balanceQueue TP_RELEASE];
+    [_tpOperationQueue TP_RELEASE];
     [_lastBackground TP_RELEASE];
     [_lastForeground TP_RELEASE];
     [(NSObject*)_delegate TP_RELEASE];
     [customParams TP_RELEASE];
     customParams = nil;
+    [__interstitialAvailabilityChecks TP_RELEASE];
+    __interstitialAvailabilityChecks = nil;
+    [_interstitialAvailabilityErrorWaitTimes TP_RELEASE];
+    _interstitialAvailabilityErrorWaitTimes = nil;
     [super TP_DEALLOC];
 }
 
@@ -125,7 +167,7 @@ NSMutableDictionary *customParams = nil;
         self.userSessionTimeout = 30*60; // defaults to 30 min
     }
 
-    // Only call appLoaded if we were in bkg for a long time, as if device user competes an offer on browser it would
+    // Only call appLoaded if we were in bkg for a long time, as if device user completes an offer on browser it would
     // cause this function to be called.
     NSTimeInterval elapsedSinceLastBackground = -[_lastBackground timeIntervalSinceNow];
     TPLog(@"Elapsed %.0f (to=%.0f)", elapsedSinceLastBackground, self.userSessionTimeout);
@@ -167,7 +209,7 @@ NSMutableDictionary *customParams = nil;
  */
 - (void)appLoaded {
     TPLogEnter;
-    TPCustomerLog(@"Loading Trialpay iOS SDK API version %@", [BaseTrialpayManager sdkVersion]);
+    TPCustomerLog(@"Loading Trialpay iOS SDK API version %@", [self sdkVersion]);
 
     NSMutableArray *visitTimestamps = [[TpDataStore sharedInstance] dataValueForKey:kTPKeyVisitTimestamps];
     if (visitTimestamps == nil) {
@@ -213,8 +255,8 @@ NSMutableDictionary *customParams = nil;
 
 
 #pragma mark - Get SDK Version
-+ (NSString*)sdkVersion {
-    return @"ios.2.90071";
+- (NSString*)sdkVersion {
+    return @"ios.2.2014080";
 }
 
 #pragma mark - BaseTrialpayManager getter/setter
@@ -447,44 +489,38 @@ NSMutableDictionary *customParams = nil;
     [[TpDataStore sharedInstance] setDataWithValue:vcBalance forKey:kTPKeyVCBalance];
 }
 
-#pragma mark - Offerwall
+#pragma mark - Dealspot
 
-- (void)setDelegate:(id <TrialpayManagerDelegate>)delegate {
-    _delegate = delegate;
-    
-    // no checks if nil
-    if (nil == _delegate) {
-        return;
-    }
+- (TpDealspotView *)createDealspotViewForTouchpoint:(NSString *)touchpointName withFrame:(CGRect)touchpointFrame {
+    // auto stop previous view, if we are recreating for the same touchpoint
+    [self stopDealspotViewForTouchpoint:touchpointName];
+    TpDealspotView *trialpayDealspotObject = [[[TpDealspotView alloc] initWithFrame:touchpointFrame forTouchpoint:touchpointName] TP_AUTORELEASE];
+    [_openDealspotViews setObject:trialpayDealspotObject forKey:touchpointName];
+    return trialpayDealspotObject;
+}
 
-    // We made the delegate methods optional, so we could allow older implementations to not fail.
-    // So, lets check that one of the methods is implemented (but not both).
-    BOOL hasDelegate = NO;
-    if ([(NSObject*)self.delegate respondsToSelector:@selector(trialpayManager:withAction:)]) {
-        hasDelegate = YES;
-        TPCustomerWarning(@"trialpayManager:withAction is deprecated", @"trialpayManager:withAction is deprecated in favor of trialpayManager:offerwallDidOpenForTouchpoint:, trialpayManager:offerwallDidCloseForTouchpoint: and trialpayManager:balanceWasUpdatedForTouchpoint:");
-    }
-    if ([(NSObject*)self.delegate respondsToSelector:@selector(trialpayManager:offerwallDidOpenForTouchpoint:)] ||
-            [(NSObject*)self.delegate respondsToSelector:@selector(trialpayManager:offerwallDidCloseForTouchpoint:)] ||
-            [(NSObject*)self.delegate respondsToSelector:@selector(trialpayManager:balanceWasUpdatedForTouchpoint:)]) {
-        if (hasDelegate) {
-            [NSException raise:@"TrialpayUseOneDelegateInterfaceOnly" format:@"Please update your TrialpayManagerDeleage removing the implementation of trialpayManager:withAction:.\nThe new interfaces are: trialpayManager:offerwallDidOpenForTouchpoint:, trialpayManager:offerwallDidCloseForTouchpoint: and trialpayManager:balanceWasUpdatedForTouchpoint:"];
-        }
-        hasDelegate = YES;
+- (void)stopDealspotViewForTouchpoint:(NSString *)touchpointName {
+    TpDealspotView *dsView = [_openDealspotViews objectForKey:touchpointName];
+    if (dsView != nil) {
+        [dsView stopLoading];
+        [dsView removeFromSuperview];
+        [_openDealspotViews removeObjectForKey:touchpointName];
     } else {
-        if (!hasDelegate) { // a warning message was already given with old delegate method.
-            TPCustomerWarning(@"Implement at least one delegate", @"Please implement at least one delegate method: trialpayManager:offerwallDidOpenForTouchpoint:, trialpayManager:offerwallDidCloseForTouchpoint: and trialpayManager:balanceWasUpdatedForTouchpoint:");
-        }
-    }
-
-    // if delegate was set but no methods were implemented, we give up, we cant live with that...
-    if (!hasDelegate) {
-        [NSException raise:@"TrialpayDelegateMustHaveAtLeastOneMethod" format:@"Please implement at least one delegate method: trialpayManager:offerwallDidOpenForTouchpoint:, trialpayManager:offerwallDidCloseForTouchpoint: and trialpayManager:balanceWasUpdatedForTouchpoint:"];
+        TPCustomerWarning(@"Dealspot view not found", @"Dealspot view not found for touchpoint %@", touchpointName);
     }
 }
 
-- (void)openOfferwallForTouchpoint:(NSString *)touchpointName {
-    TPLog(@"openOfferwallForTouchpoint:%@", touchpointName);
+#pragma mark - openTouchpoint
+
+- (void)openTouchpoint:(NSString *)touchpointName {
+    TPLog(@"openTouchpoint:%@", touchpointName);
+    BOOL isAvailable = [self isAvailableTouchpoint:touchpointName];
+    if (!isAvailable) {
+        TPCustomerWarning(@"Touchpoint is not available and will not be opened", @"Touchpoint %@ is not available and will not be opened", touchpointName);
+        return;
+    }
+    // TODO: rename several items here (isShowingOfferwall, TpOfferwallViewController, trialpayManager:offerwallDidOpenForTouchpoint, etc) to
+    // no longer mention the offerwall, because their use now extends beyond the offerwall.
     _isShowingOfferwall = YES;
     TPLog(@"isShowingOfferwall YES");
     TpOfferwallViewController *tpOfferwall = [[TpOfferwallViewController alloc] initWithTouchpointName:touchpointName];
@@ -510,28 +546,6 @@ NSMutableDictionary *customParams = nil;
     });
     [tpOfferwall TP_RELEASE];
 }
-
-#pragma mark - Dealspot
-
-- (TpDealspotView *)createDealspotViewForTouchpoint:(NSString *)touchpointName withFrame:(CGRect)touchpointFrame {
-    // auto stop previous view, if we are recreating for the same touchpoint
-    [self stopDealspotViewForTouchpoint:touchpointName];
-    TpDealspotView *trialpayDealspotObject = [[[TpDealspotView alloc] initWithFrame:touchpointFrame forTouchpoint:touchpointName] TP_AUTORELEASE];
-    [_openDealspotViews setObject:trialpayDealspotObject forKey:touchpointName];
-    return trialpayDealspotObject;
-}
-
-- (void)stopDealspotViewForTouchpoint:(NSString *)touchpointName {
-    TpDealspotView *dsView = [_openDealspotViews objectForKey:touchpointName];
-    if (dsView != nil) {
-        [dsView stopLoading];
-        [dsView removeFromSuperview];
-        [_openDealspotViews removeObjectForKey:touchpointName];
-    } else {
-        TPCustomerWarning(@"Dealspot view not found", @"Dealspot view not found for touchpoint %@", touchpointName);
-    }
-}
-
 
 #pragma mark - Balance
 
@@ -624,7 +638,7 @@ static NSOperation *__balanceQueryAndWithdrawOperation;
     TPLogEnter;
     [self stopBalanceChecks];
     __balanceQueryAndWithdrawOperation = [TPBalanceCheckOperation new];
-    [_balanceQueue addOperation:__balanceQueryAndWithdrawOperation];
+    [_tpOperationQueue addOperation:__balanceQueryAndWithdrawOperation];
 }
 
 - (int)withdrawBalanceForTouchpoint:(NSString *)touchpointName {
@@ -654,7 +668,7 @@ static NSOperation *__balanceQueryAndWithdrawOperation;
 - (void)setCustomParamValue:(NSString *)paramValue forName:(NSString *)paramName {
     // make sure that the parameter name is set.
     if (paramName == nil || [paramName isEqualToString:@""]) {
-        TPLog(@"Cannot set a parameter without a parameter name. Skips.");
+        TPLog(@"Cannot set a parameter without a parameter name. Skipping.");
         return;
     }
     // create the custom param dictionary
@@ -688,8 +702,43 @@ static NSOperation *__balanceQueryAndWithdrawOperation;
 }
 
 
-#pragma mark - Delegate
+#pragma mark - Delegation
 
+- (void)setDelegate:(id <TrialpayManagerDelegate>)delegate {
+    _delegate = delegate;
+
+    // no checks if nil
+    if (nil == _delegate) {
+        return;
+    }
+
+    // We made the delegate methods optional, so we could allow older implementations to not fail.
+    // So, lets check that one of the methods is implemented (but not both).
+    BOOL hasDelegate = NO;
+    if ([(NSObject*)self.delegate respondsToSelector:@selector(trialpayManager:withAction:)]) {
+        hasDelegate = YES;
+        TPCustomerWarning(@"trialpayManager:withAction is deprecated", @"trialpayManager:withAction is deprecated in favor of trialpayManager:offerwallDidOpenForTouchpoint:, trialpayManager:offerwallDidCloseForTouchpoint: and trialpayManager:balanceWasUpdatedForTouchpoint:");
+    }
+    if ([(NSObject*)self.delegate respondsToSelector:@selector(trialpayManager:offerwallDidOpenForTouchpoint:)] ||
+            [(NSObject*)self.delegate respondsToSelector:@selector(trialpayManager:offerwallDidCloseForTouchpoint:)] ||
+            [(NSObject*)self.delegate respondsToSelector:@selector(trialpayManager:balanceWasUpdatedForTouchpoint:)]) {
+        if (hasDelegate) {
+            [NSException raise:@"TrialpayUseOneDelegateInterfaceOnly" format:@"Please update your TrialpayManagerDeleage removing the implementation of trialpayManager:withAction:.\nThe new interfaces are: trialpayManager:offerwallDidOpenForTouchpoint:, trialpayManager:offerwallDidCloseForTouchpoint: and trialpayManager:balanceWasUpdatedForTouchpoint:"];
+        }
+        hasDelegate = YES;
+    } else {
+        if (!hasDelegate) { // a warning message was already given with old delegate method.
+            TPCustomerWarning(@"Implement at least one delegate", @"Please implement at least one delegate method: trialpayManager:offerwallDidOpenForTouchpoint:, trialpayManager:offerwallDidCloseForTouchpoint: and trialpayManager:balanceWasUpdatedForTouchpoint:");
+        }
+    }
+
+    // if delegate was set but no methods were implemented, we give up, we cant live with that...
+    if (!hasDelegate) {
+        [NSException raise:@"TrialpayDelegateMustHaveAtLeastOneMethod" format:@"Please implement at least one delegate method: trialpayManager:offerwallDidOpenForTouchpoint:, trialpayManager:offerwallDidCloseForTouchpoint: and trialpayManager:balanceWasUpdatedForTouchpoint:"];
+    }
+}
+
+// Conform to TpOfferwallViewControllerDelegate protocol
 - (void)tpOfferwallViewController:(TpOfferwallViewController *)tpOfferwallViewController close:(id)sender forTouchpointName:(NSString *)touchpointName {
     TPLogEnter;
     // wait for the navigation animation ~ 300ms,
@@ -713,7 +762,134 @@ static NSOperation *__balanceQueryAndWithdrawOperation;
         if (__balanceQueryAndWithdrawOperation) {
             [self initiateBalanceChecks]; // lets check right now!
         }
+
+        // restart the availability check if one is ongoing
+        if ([__interstitialAvailabilityChecks objectForKey:touchpointName]) {
+            [self stopAvailabilityCheckForTouchpoint:touchpointName];
+            [self startAvailabilityCheckForTouchpoint:touchpointName];
+        }
     });
+}
+
+#pragma mark - Interstitial Availability
+
+// store the availability operations so that they can be cancelled and cleared before restarting them
+NSMutableDictionary *__interstitialAvailabilityChecks = nil;
+
+- (void)startAvailabilityCheckForTouchpoint:(NSString *)touchpointName {
+    TPLog(@"startAvailabilityCheckForTouchpoint:%@", touchpointName);
+    // populate the user agent. we need to do this here because background threads aren't allowed to create a web view.
+    [[TpUserAgent sharedInstance] populateUserAgent];
+    TpAvailabilityCheckOperation *newOp = [TpAvailabilityCheckOperation new];
+    newOp.touchpointName = touchpointName;
+    if (__interstitialAvailabilityChecks == nil) {
+        __interstitialAvailabilityChecks = [[NSMutableDictionary alloc] init];
+    }
+    [__interstitialAvailabilityChecks setObject:newOp forKey:touchpointName];
+    [_tpOperationQueue addOperation:newOp];
+}
+
+- (void)stopAvailabilityCheckForTouchpoint:(NSString *)touchpointName {
+    TPLog(@"stopAvailabilityCheckForTouchpoint:%@", touchpointName);
+    [[__interstitialAvailabilityChecks objectForKey:touchpointName] cancel];
+    [[__interstitialAvailabilityChecks objectForKey:touchpointName] TP_RELEASE];
+    [__interstitialAvailabilityChecks removeObjectForKey:touchpointName];
+}
+
+NSMutableDictionary *_interstitialAvailabilityErrorWaitTimes = nil;
+
+// returns the validity time, in seconds, until we should check availability again
+- (int)checkInterstitialAvailabilityForTouchpoint:(NSString *)touchpointName {
+    int validity_time;
+
+    // get the availability URL
+    NSString *userAgent = [TpUserAgent sharedInstance].userAgent;
+    NSString *availabilityURL = [[TpUrlManager sharedInstance] dealspotAvailabilityUrlForTouchpoint:touchpointName userAgent:userAgent];
+    TPLog(@"Interstitial Availability URL: %@", availabilityURL);
+    if (availabilityURL == nil) {
+        [self registerDealspotURL:@"" forTouchpoint:touchpointName]; // store an empty URL to indicate unavailability
+        validity_time = TP_AVAILABILITY_DEFAULT_VALIDITY_TIME;
+        return validity_time;
+    }
+
+    // grab contents of the URL
+    NSError *downloadError = nil;
+    NSData *responseData = [NSData dataWithContentsOfURL:[NSURL URLWithString:availabilityURL] options:NSDataReadingMappedIfSafe error:&downloadError];
+    if (downloadError) {
+        TPCustomerError(@"TrialPay API Dealspot Availability Query Error", @"TrialPay API Dealspot Availability query error for touchpoint %@: %@", touchpointName, downloadError);
+        [self registerDealspotURL:@"" forTouchpoint:touchpointName]; // store an empty URL to indicate unavailability
+        validity_time = [self interstitialAvailabilityErrorTimeForTouchpoint:touchpointName];
+        return validity_time;
+    }
+    if (responseData == nil) {
+        TPCustomerError(@"Trialpay API Dealspot Availability Query did not return data. Please verify setup and parameters.", @"Trialpay API Dealspot Availability query for touchpoint %@ did not return data. Please verify setup and parameters.", touchpointName);
+        [self registerDealspotURL:@"" forTouchpoint:touchpointName]; // store an empty URL to indicate unavailability
+        validity_time = [self interstitialAvailabilityErrorTimeForTouchpoint:touchpointName];
+        return validity_time;
+    }
+
+    // decode the contents
+    NSError *decodeError = nil;
+    NSDictionary *availabilityInfo = [NSJSONSerialization JSONObjectWithData:responseData options:0 error:&decodeError];
+    if (decodeError) {
+        TPCustomerError(@"TrialPay API Dealspot Availability Results Error", @"TrialPay API Dealspot Availability results error for Touchpoint %@: %@", touchpointName, downloadError);
+        [self registerDealspotURL:@"" forTouchpoint:touchpointName]; // store an empty URL to indicate unavailability
+        validity_time = TP_AVAILABILITY_DEFAULT_VALIDITY_TIME;
+        return validity_time;
+    }
+    NSNumber *validity_time_object = [availabilityInfo objectForKey:@"validity_time"];
+    // validity_time might not be set on the response. if not set then we fallback to default.
+    if (validity_time_object != nil) {
+        validity_time = [validity_time_object intValue];
+    } else {
+        validity_time = TP_AVAILABILITY_DEFAULT_VALIDITY_TIME;
+    }
+    NSMutableString *url = [availabilityInfo objectForKey:@"url"];
+
+    // remove the error wait time for this touchpoint, if one is stored
+    if (_interstitialAvailabilityErrorWaitTimes != nil) {
+        [_interstitialAvailabilityErrorWaitTimes removeObjectForKey:touchpointName];
+    }
+
+    // save URL and return
+    [self registerDealspotURL:url forTouchpoint:touchpointName];
+    return validity_time;
+}
+
+// return the time in seconds when we should retry the availability check
+- (int)interstitialAvailabilityErrorTimeForTouchpoint:(NSString *)touchpointName {
+    if (_interstitialAvailabilityErrorWaitTimes == nil) {
+        _interstitialAvailabilityErrorWaitTimes = [[NSMutableDictionary alloc] init];
+    }
+    // grab the last wait time for this touchpoint.
+    NSNumber *error_wait_time_object = [_interstitialAvailabilityErrorWaitTimes objectForKey:touchpointName];
+    int error_wait_time;
+    if (error_wait_time_object == nil) {
+        // this is our first request or the last request was a success. start with a wait of 10 seconds.
+        error_wait_time = 10;
+    } else {
+        error_wait_time = [error_wait_time_object intValue] * 2; // wait twice as long as last time
+    }
+    if (error_wait_time > TP_AVAILABILITY_DEFAULT_VALIDITY_TIME) {
+        error_wait_time = TP_AVAILABILITY_DEFAULT_VALIDITY_TIME;
+    }
+    // store the current wait time
+    [_interstitialAvailabilityErrorWaitTimes setValue:[NSNumber numberWithInt:error_wait_time] forKey:touchpointName];
+
+    return error_wait_time;
+}
+
+- (BOOL)isAvailableTouchpoint:(NSString *)touchpointName; {
+    NSString *dealspotURL = [self urlForDealspotTouchpoint:touchpointName];
+    if (dealspotURL == nil) {
+        // small hack: we assume that actual DS touchpoints will have registered a URL, which means this is an OW touchpoint and is always available
+        return YES;
+    } else if ([dealspotURL isEqual:@""]) {
+        // we store an empty string when the availability check fails
+        return NO;
+    } else {
+        return YES;
+    }
 }
 
 @end

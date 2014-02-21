@@ -4,6 +4,8 @@
 //
 
 #import <Foundation/Foundation.h>
+// Added import to prevent compilation erros on Adobe - INTERNAL
+#import <CoreGraphics/CoreGraphics.h>
 
 extern NSString *kTPKeyCustomDispatchPrefixUrl;
 extern NSString *kTPKeyCustomBalancePrefixUrl;

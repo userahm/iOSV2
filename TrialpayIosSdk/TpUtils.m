@@ -7,6 +7,7 @@
 //
 
 #import "TpUtils.h"
+#import "TpArcSupport.h"
 
 #if !defined(TRIALPAY_VERBOSE)
 BOOL __trialpayVerbose=NO;
@@ -20,12 +21,12 @@ BOOL __trialpayVerbose=YES;
     __trialpayVerbose = verbose;
 }
 
-+ (NSString*) appVersion {
++ (NSString*)appVersion {
     NSString* version = [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleVersion"];
     return [NSString stringWithFormat:@"%@", version];
 }
 
-+ (NSString*) idfa {
++ (NSString*)idfa {
 #if __IPHONE_OS_VERSION_MAX_ALLOWED > __IPHONE_5_1
     if (NSClassFromString(@"ASIdentifierManager")) {
         return [[[ASIdentifierManager sharedManager] advertisingIdentifier] UUIDString];
@@ -93,6 +94,11 @@ BOOL __trialpayVerbose=YES;
                                   macAddress[0], macAddress[1], macAddress[2],
                                   macAddress[3], macAddress[4], macAddress[5]];
     
+    if (macAddress[0] == 2 && macAddress[1] == macAddress[2] == macAddress[3] == macAddress[4] == macAddress[5] == 0) {
+        // iOS7 result in 02000000000000, so lets return nil
+        return nil;
+    }
+    
     // Release the buffer memory
     free(msgBuffer);
     
@@ -137,5 +143,29 @@ BOOL __trialpayVerbose=YES;
     return Unknown;
 }
 
+
+@end
+
+#pragma mark - TpUserAgent
+
+@implementation TpUserAgent
+
+TpUserAgent *__TpUserAgentSingleton = nil;
++ (TpUserAgent *)sharedInstance {
+    if (__TpUserAgentSingleton) return __TpUserAgentSingleton;
+    __TpUserAgentSingleton = [[TpUserAgent alloc] init];
+    return __TpUserAgentSingleton;
+}
+
+-(void)populateUserAgent {
+    UIWebView *webView = [[UIWebView alloc] initWithFrame:CGRectZero];
+    self.userAgent = [webView stringByEvaluatingJavaScriptFromString:@"navigator.userAgent"];
+    [webView TP_DEALLOC];
+}
+
+- (void)dealloc {
+    [self.userAgent TP_RELEASE];
+    [super TP_DEALLOC];
+}
 
 @end

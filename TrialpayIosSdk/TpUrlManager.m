@@ -201,11 +201,12 @@ TpUrlManager *__TrialPayURLManagerSingleton = nil;
 
     NSString *availabilityUrl = [TpUrlManager getPrefixUrl:TPDeaslpotAvailabilityPrefixUrl];
 
-    NSString *urlAddress = [NSString stringWithFormat:@"%@/?%@", availabilityUrl,
+    NSString *urlAddress = [NSString stringWithFormat:@"%@?%@", availabilityUrl,
                                                       [TpUrlManager buildQueryString:
                                                               @"vic", [data objectForKey:@"vic"],
                                                               @"sid", [data objectForKey:@"sid"],
                                                               @"ua", userAgent,
+                                                              @"idfa", [TpUtils idfa],
                                                               TP_END_QUERY]];
 
     return urlAddress;
@@ -222,7 +223,8 @@ TpUrlManager *__TrialPayURLManagerSingleton = nil;
             @"sid", [[BaseTrialpayManager sharedInstance] sid],
             @"appver", [TpUtils appVersion],
             @"idfa", [TpUtils idfa],
-            @"sdkver", [BaseTrialpayManager sdkVersion],
+            @"mac", [TpUtils macAddress],
+            @"sdkver", [[BaseTrialpayManager sharedInstance] sdkVersion],
             @"tp_base_page", @"1",
             TP_END_QUERY]];
 

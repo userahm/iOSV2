@@ -73,7 +73,7 @@ In your view controller module
 - (IBAction)openOfferwallWithSender:(id)sender
 {
     TrialpayManager *trialpayManager = [TrialpayManager getInstance];
-    [trialpayManager openOfferwallForTouchpoint:@"<YOUR_OFFERWALL_TOUCHPOINT_NAME>"];
+    [trialpayManager openTouchpoint:@"<YOUR_OFFERWALL_TOUCHPOINT_NAME>"];
 }
 
 // Listen to TrialPay's balance updates if you're using the Balance API
@@ -153,7 +153,7 @@ If you're using the callback method and created a custom parameter on the mercha
 - (IBAction)openOfferwallWithSender:(id)sender {
   TrialpayManager *trialpayManager = [TrialpayManager getInstance];
   [trialpayManager setCustomParamValue:@"custom_param_value" forName:@"my_custom_parameter";];
-  [trialpayManager openOfferwallForTouchpoint:@"<YOUR_OFFERWALL_TOUCHPOINT_NAME>"];
+  [trialpayManager openTouchpoint:@"<YOUR_OFFERWALL_TOUCHPOINT_NAME>"];
 }
 @endcode
 Note: the custom parameter value is being reset after opening the Offer Wall
@@ -185,7 +185,7 @@ Note: the custom parameter value is being reset after opening the Offer Wall
      Get the version of the SDK.
      @return The SDK Version.
  */
-+ (NSString*)sdkVersion;
+- (NSString*)sdkVersion;
 
 /*!
      Set SID (device user identification). The SID is an unique user id for each device user. It will be used to uniquely identify your user with Trialpay system for monetization and customer support purposes.
@@ -212,8 +212,15 @@ Note: the custom parameter value is being reset after opening the Offer Wall
 /*!
     Open the Trialpay Offer Wall for a given touchpoint.
     @param touchpointName The touchpoint.
+
+    @deprecated - Please use openTouchpoint:
 */
-- (void)openOfferwallForTouchpoint:(NSString *)touchpointName;
+- (void)openOfferwallForTouchpoint:(NSString *)touchpointName __attribute__((deprecated));
+/*!
+    Open the touchpoint. This function should be used for Offerwall and Interstitial touchpoints.
+    @param touchpointName The touchpoint
+*/
+- (void)openTouchpoint:(NSString *)touchpointName;
 
 /*!
     Create the Trialpay Dealspot for a given touchpoint.

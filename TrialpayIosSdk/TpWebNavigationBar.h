@@ -5,6 +5,8 @@
 
 
 #import <Foundation/Foundation.h>
+// Added UIKit to prevent compilation erros on adobe - INTERNAL
+#import <UIKit/UIKit.h>
 #import "TpNavigationBarDelegate.h"
 
 

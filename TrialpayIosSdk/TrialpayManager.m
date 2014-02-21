@@ -22,7 +22,7 @@ static TrialpayManager *__trialpayManagerInstance;
 }
 
 #pragma mark - Get SDK Version
-+ (NSString*) sdkVersion {
+- (NSString*) sdkVersion {
     return [NSString stringWithFormat:@"sdk.%@", [super sdkVersion]];
 }
 
@@ -38,8 +38,13 @@ static TrialpayManager *__trialpayManagerInstance;
     [super registerVic:vic withTouchpoint:touchpointName];
 }
 
+// deprecated - developers should call openTouchpoint instead
 - (void)openOfferwallForTouchpoint:(NSString *)touchpointName {
-    [super openOfferwallForTouchpoint:touchpointName];
+    [super openTouchpoint:touchpointName];
+}
+
+- (void)openTouchpoint:(NSString *)touchpointName {
+    [super openTouchpoint:touchpointName];
 }
 
 - (TpDealspotView *)createDealspotViewForTouchpoint:(NSString *)touchpointName withFrame:(CGRect)touchpointFrame {

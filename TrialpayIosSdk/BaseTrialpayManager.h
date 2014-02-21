@@ -25,7 +25,7 @@ extern NSString *TPBalanceUpdateActionString;  /*! The device user balance was u
 @property (nonatomic, assign) BOOL useWebNavigationBar;
 
 + (BaseTrialpayManager *)sharedInstance;
-+ (NSString*)sdkVersion;
+- (NSString*)sdkVersion;
 
 - (void)appLoaded;
 
@@ -34,7 +34,7 @@ extern NSString *TPBalanceUpdateActionString;  /*! The device user balance was u
 
 - (void)registerVic:(NSString *)vic withTouchpoint:(NSString *)touchpointName;
 
-- (void)openOfferwallForTouchpoint:(NSString *)touchpointName;
+- (void)openTouchpoint:(NSString *)touchpointName;
 
 - (TpDealspotView *)createDealspotViewForTouchpoint:(NSString *)touchpointName withFrame:(CGRect)touchpointFrame;
 
@@ -55,6 +55,8 @@ extern NSString *TPBalanceUpdateActionString;  /*! The device user balance was u
 - (void)updateVcPurchaseInfoForTouchpoint:(NSString *)touchpointName dollarAmount:(float)dollarAmount vcAmount:(int)vcAmount;
 - (void)updateVcBalanceForTouchpoint:(NSString *)touchpointName vcAmount:(int)vcAmount;
 
+- (void)startAvailabilityCheckForTouchpoint:(NSString *)touchpointName;
+- (BOOL)isAvailableTouchpoint:(NSString *)touchpointName;
 
 @property (strong, nonatomic) id<TrialpayManagerDelegate> delegate;
 
