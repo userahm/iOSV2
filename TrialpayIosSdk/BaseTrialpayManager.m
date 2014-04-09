@@ -12,6 +12,7 @@
 #import "TrialpayManager.h"
 #import "TpUtils.h"
 #import "TpUrlManager.h"
+#import "TpVideo.h"
 
 // how many UNIX timestamps for the customer's last sessions will be stored
 #define TP_MAX_VISIT_TIMESTAMPS 5
@@ -28,7 +29,6 @@ NSString *TPBalanceUpdateActionString  = @"balance_update";
 - (void)stopAvailabilityCheckForTouchpoint:(NSString *)touchpointName;
 - (int)interstitialAvailabilityErrorTimeForTouchpoint:(NSString *)touchpointName;
 
-@property (assign, nonatomic) __block BOOL isShowingOfferwall; // will be modified by a block
 @property (nonatomic) NSTimeInterval userSessionTimeout; // To allow change on value
 @end
 
@@ -124,6 +124,8 @@ BaseTrialpayManager *__baseTrialpayManager;
         [self startListeningToAppStateNotifications];
 
         _openDealspotViews = [NSMutableDictionary new];
+
+        [[TpVideo sharedInstance] pruneVideoStorage];
     }
     return self;
 }
@@ -256,7 +258,7 @@ NSMutableDictionary *customParams = nil;
 
 #pragma mark - Get SDK Version
 - (NSString*)sdkVersion {
-    return @"ios.2.2014080";
+    return @"ios.2.2014120";
 }
 
 #pragma mark - BaseTrialpayManager getter/setter
@@ -523,6 +525,15 @@ NSMutableDictionary *customParams = nil;
     // no longer mention the offerwall, because their use now extends beyond the offerwall.
     _isShowingOfferwall = YES;
     TPLog(@"isShowingOfferwall YES");
+
+    // Check for the video trailer flow, which does not use the normal webview.
+    NSString *dealspotURL = [self urlForDealspotTouchpoint:touchpointName];
+    if ([dealspotURL hasPrefix:kTPKeyVideoPrefix]) {
+        NSString *videoResourceURL = [dealspotURL substringFromIndex:[kTPKeyVideoPrefix length]];
+        [[TpVideo sharedInstance] playVideoWithURL:videoResourceURL];
+        return;
+    }
+
     TpOfferwallViewController *tpOfferwall = [[TpOfferwallViewController alloc] initWithTouchpointName:touchpointName];
     tpOfferwall.delegate = self;
 
@@ -792,7 +803,6 @@ NSMutableDictionary *__interstitialAvailabilityChecks = nil;
 - (void)stopAvailabilityCheckForTouchpoint:(NSString *)touchpointName {
     TPLog(@"stopAvailabilityCheckForTouchpoint:%@", touchpointName);
     [[__interstitialAvailabilityChecks objectForKey:touchpointName] cancel];
-    [[__interstitialAvailabilityChecks objectForKey:touchpointName] TP_RELEASE];
     [__interstitialAvailabilityChecks removeObjectForKey:touchpointName];
 }
 
@@ -802,12 +812,14 @@ NSMutableDictionary *_interstitialAvailabilityErrorWaitTimes = nil;
 - (int)checkInterstitialAvailabilityForTouchpoint:(NSString *)touchpointName {
     int validity_time;
 
+    // Mark the touchpoint as unavailable until the API request completes.
+    [self registerDealspotURL:@"" forTouchpoint:touchpointName];
+
     // get the availability URL
     NSString *userAgent = [TpUserAgent sharedInstance].userAgent;
     NSString *availabilityURL = [[TpUrlManager sharedInstance] dealspotAvailabilityUrlForTouchpoint:touchpointName userAgent:userAgent];
-    TPLog(@"Interstitial Availability URL: %@", availabilityURL);
+    TPLog(@"Interstitial Availability URL for touchpoint %@: %@", touchpointName, availabilityURL);
     if (availabilityURL == nil) {
-        [self registerDealspotURL:@"" forTouchpoint:touchpointName]; // store an empty URL to indicate unavailability
         validity_time = TP_AVAILABILITY_DEFAULT_VALIDITY_TIME;
         return validity_time;
     }
@@ -817,13 +829,11 @@ NSMutableDictionary *_interstitialAvailabilityErrorWaitTimes = nil;
     NSData *responseData = [NSData dataWithContentsOfURL:[NSURL URLWithString:availabilityURL] options:NSDataReadingMappedIfSafe error:&downloadError];
     if (downloadError) {
         TPCustomerError(@"TrialPay API Dealspot Availability Query Error", @"TrialPay API Dealspot Availability query error for touchpoint %@: %@", touchpointName, downloadError);
-        [self registerDealspotURL:@"" forTouchpoint:touchpointName]; // store an empty URL to indicate unavailability
         validity_time = [self interstitialAvailabilityErrorTimeForTouchpoint:touchpointName];
         return validity_time;
     }
     if (responseData == nil) {
         TPCustomerError(@"Trialpay API Dealspot Availability Query did not return data. Please verify setup and parameters.", @"Trialpay API Dealspot Availability query for touchpoint %@ did not return data. Please verify setup and parameters.", touchpointName);
-        [self registerDealspotURL:@"" forTouchpoint:touchpointName]; // store an empty URL to indicate unavailability
         validity_time = [self interstitialAvailabilityErrorTimeForTouchpoint:touchpointName];
         return validity_time;
     }
@@ -833,7 +843,6 @@ NSMutableDictionary *_interstitialAvailabilityErrorWaitTimes = nil;
     NSDictionary *availabilityInfo = [NSJSONSerialization JSONObjectWithData:responseData options:0 error:&decodeError];
     if (decodeError) {
         TPCustomerError(@"TrialPay API Dealspot Availability Results Error", @"TrialPay API Dealspot Availability results error for Touchpoint %@: %@", touchpointName, downloadError);
-        [self registerDealspotURL:@"" forTouchpoint:touchpointName]; // store an empty URL to indicate unavailability
         validity_time = TP_AVAILABILITY_DEFAULT_VALIDITY_TIME;
         return validity_time;
     }
@@ -844,7 +853,41 @@ NSMutableDictionary *_interstitialAvailabilityErrorWaitTimes = nil;
     } else {
         validity_time = TP_AVAILABILITY_DEFAULT_VALIDITY_TIME;
     }
-    NSMutableString *url = [availabilityInfo objectForKey:@"url"];
+    NSString *dealspotURL;
+    NSString *responseType = [availabilityInfo objectForKey:@"type"];
+    if ([responseType isEqualToString:@"web"]) {
+        dealspotURL = [availabilityInfo objectForKey:@"url"];
+    } else if ([responseType isEqualToString:@"video_trailer"]) {
+        NSString *downloadURL = [availabilityInfo objectForKey:@"dl_url"];
+        // cd_text may not be supplied
+        NSString *countdownText = [availabilityInfo objectForKey:@"cd_text"] ? [availabilityInfo objectForKey:@"cd_text"] : @"";
+        // Convert the text color string to the UIColor name
+        NSString *textColor = [NSString stringWithFormat:@"%@Color", [availabilityInfo objectForKey:@"tc"]];
+        // Convert the expiration time from a time interval to a date
+        NSDate *expirationTime = [NSDate dateWithTimeIntervalSinceNow:[[availabilityInfo objectForKey:@"exp"] intValue]];
+
+        NSDictionary *videoParams = [NSDictionary dictionaryWithObjectsAndKeys:
+            [availabilityInfo objectForKey:@"toi_url"],         @"impressionURL",
+            [availabilityInfo objectForKey:@"ck_url"],          @"clickURL",
+            [availabilityInfo objectForKey:@"cn_url"],          @"completionURL",
+            [availabilityInfo objectForKey:@"ec_url"],          @"endcapURL",
+            [availabilityInfo objectForKey:@"ec_ck_url"],       @"endcapClickURL",
+            [availabilityInfo objectForKey:@"app_id"],          @"appID",
+            [availabilityInfo objectForKey:@"completion_time"], @"completionTime",
+            [availabilityInfo objectForKey:@"exit_delay"],      @"exitButtonDelay",
+            [availabilityInfo objectForKey:@"use_cd"],          @"isShowCountdown",
+            countdownText,                                      @"countdownText",
+            textColor,                                          @"textColor",
+            expirationTime,                                     @"expirationTime",
+            nil];
+        // Store video offer attributes and begin downloading the video to local storage.
+        [[TpVideo sharedInstance] initializeVideo:(NSString *)downloadURL withParams:videoParams];
+
+        dealspotURL = [NSString stringWithFormat:@"%@%@", kTPKeyVideoPrefix, downloadURL];
+    } else {
+        dealspotURL = [NSString stringWithFormat:@""];
+    }
+
 
     // remove the error wait time for this touchpoint, if one is stored
     if (_interstitialAvailabilityErrorWaitTimes != nil) {
@@ -852,7 +895,7 @@ NSMutableDictionary *_interstitialAvailabilityErrorWaitTimes = nil;
     }
 
     // save URL and return
-    [self registerDealspotURL:url forTouchpoint:touchpointName];
+    [self registerDealspotURL:dealspotURL forTouchpoint:touchpointName];
     return validity_time;
 }
 
@@ -887,6 +930,9 @@ NSMutableDictionary *_interstitialAvailabilityErrorWaitTimes = nil;
     } else if ([dealspotURL isEqual:@""]) {
         // we store an empty string when the availability check fails
         return NO;
+    } else if ([dealspotURL hasPrefix:kTPKeyVideoPrefix]) {
+        NSString *videoResourceURL = [dealspotURL substringFromIndex:[kTPKeyVideoPrefix length]];
+        return [[TpVideo sharedInstance] isResourceReady:videoResourceURL];
     } else {
         return YES;
     }

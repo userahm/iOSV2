@@ -23,3 +23,5 @@ extern NSString *kTPKeyVCAmount;
 extern NSString *kTPSid;
 extern NSString *kTPKeySecondsValid;
 extern NSString *kTPKeyUseWebNavigationBar;
+extern NSString *kTPKeyVideoMetaData;
+extern NSString *kTPKeyVideoPrefix;

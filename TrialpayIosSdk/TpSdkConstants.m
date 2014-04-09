@@ -21,4 +21,6 @@ NSString *kTPSid                 = @"sid";
 NSString *kTPKeySecondsValid     = @"seconds_valid";
 NSString *kTPKeyBalance          = @"balance";
 NSString *kTPKeyUseWebNavigationBar = @"useWebNavigationBar";
+NSString *kTPKeyVideoMetaData    = @"videoMetaData";
+NSString *kTPKeyVideoPrefix      = @"tpvideo://";
 

@@ -59,6 +59,7 @@ extern NSString *TPBalanceUpdateActionString;  /*! The device user balance was u
 - (BOOL)isAvailableTouchpoint:(NSString *)touchpointName;
 
 @property (strong, nonatomic) id<TrialpayManagerDelegate> delegate;
+@property (assign, nonatomic) __block BOOL isShowingOfferwall; // will be modified by a block
 
 - (void)registerDealspotURL:(NSString *)urlString forTouchpoint:(NSString *)touchpointName;
 

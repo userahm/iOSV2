@@ -70,6 +70,7 @@ NSLog(@"[TPLOG] [%50.50s] %@", \
 + (NSString *)idfa;
 + (NSString *)macAddress;
 + (NSString *)sha1:(NSString*)input;
++ (int)getBasicOrientationSupport;
 
 + (NSString *)genderCodeForValue:(Gender)gender;
 + (Gender)genderValueForCode:(NSString *)genderStr;

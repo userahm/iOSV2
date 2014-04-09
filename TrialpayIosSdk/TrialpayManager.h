@@ -249,6 +249,18 @@ Note: the custom parameter value is being reset after opening the Offer Wall
 - (int)withdrawBalanceForTouchpoint:(NSString *)touchpointName;
 
 /*!
+    Start availability checks. Call this method only once, within your application:didFinishLaunchingWithOptions:.
+    @note Only start availability checks for Interstitial flow.
+*/
+- (void)startAvailabilityCheckForTouchpoint:(NSString *)touchpointName;
+
+/*!
+    Check whether a touchpoint is available
+    @note Check availability only for Interstitial flows
+ */
+- (BOOL)isAvailableTouchpoint:(NSString *)touchpointName;
+
+/*!
     Set the age of the device user. Affects all touchpoints.
     This method should be called on device user registration or during initialization.
     @param age The age of device user.

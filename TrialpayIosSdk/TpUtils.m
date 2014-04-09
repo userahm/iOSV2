@@ -8,6 +8,7 @@
 
 #import "TpUtils.h"
 #import "TpArcSupport.h"
+#import <UIKit/UIKit.h>
 
 #if !defined(TRIALPAY_VERBOSE)
 BOOL __trialpayVerbose=NO;
@@ -143,6 +144,32 @@ BOOL __trialpayVerbose=YES;
     return Unknown;
 }
 
+/*
+ * Determine whether the app supports portrait and/or landscape orientations.
+ * Returns a 2-bit mask, where minor bit indicates portrait support and major bit is landscape support:
+ *   0 - neither orientation supported (this should never occur)
+ *   1 - portrait is supported, landscape is not
+ *   2 - landscape is supported, portrait is not
+ *   3 - both orientations are supported
+ */
++ (int)getBasicOrientationSupport {
+    NSUInteger supportedOrientationMask;
+    UIApplication *app = [UIApplication sharedApplication];
+    if ([app.delegate respondsToSelector:@selector(application:supportedInterfaceOrientationsForWindow:)]) {
+        supportedOrientationMask = [app.delegate application:app supportedInterfaceOrientationsForWindow:app.keyWindow];
+    } else {
+        supportedOrientationMask = [app supportedInterfaceOrientationsForWindow:app.keyWindow];
+    }
+    int basicMask = 0;
+    if (supportedOrientationMask & (UIInterfaceOrientationMaskPortrait | UIInterfaceOrientationMaskPortraitUpsideDown)) {
+        basicMask += 1; // app supports portrait
+    }
+    if (supportedOrientationMask & (UIInterfaceOrientationMaskLandscapeLeft | UIInterfaceOrientationMaskLandscapeRight)) {
+        basicMask += 2; // app supports landscape
+    }
+    return basicMask;
+}
+
 
 @end
 
@@ -160,11 +187,10 @@ TpUserAgent *__TpUserAgentSingleton = nil;
 -(void)populateUserAgent {
     UIWebView *webView = [[UIWebView alloc] initWithFrame:CGRectZero];
     self.userAgent = [webView stringByEvaluatingJavaScriptFromString:@"navigator.userAgent"];
-    [webView TP_DEALLOC];
+    [webView TP_RELEASE];
 }
 
 - (void)dealloc {
-    [self.userAgent TP_RELEASE];
     [super TP_DEALLOC];
 }
 

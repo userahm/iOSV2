@@ -201,14 +201,13 @@ TpUrlManager *__TrialPayURLManagerSingleton = nil;
 
     NSString *availabilityUrl = [TpUrlManager getPrefixUrl:TPDeaslpotAvailabilityPrefixUrl];
 
-    NSString *urlAddress = [NSString stringWithFormat:@"%@?%@", availabilityUrl,
-                                                      [TpUrlManager buildQueryString:
-                                                              @"vic", [data objectForKey:@"vic"],
-                                                              @"sid", [data objectForKey:@"sid"],
-                                                              @"ua", userAgent,
-                                                              @"idfa", [TpUtils idfa],
-                                                              TP_END_QUERY]];
-
+    NSMutableString *urlAddress = [NSMutableString stringWithFormat:@"%@?%@", availabilityUrl,
+                                                   [TpUrlManager buildQueryString:
+                                                                 @"vic", [data objectForKey:@"vic"],
+                                                                 @"ua", userAgent,
+                                                                 @"orientation_support", [NSNumber numberWithInt:[TpUtils getBasicOrientationSupport]],
+                                                                 TP_END_QUERY]];
+    [self addCommonQueryParams:touchpointName toUrl:urlAddress];
     return urlAddress;
 }
 

@@ -63,6 +63,14 @@ static TrialpayManager *__trialpayManagerInstance;
     return [super withdrawBalanceForTouchpoint:touchpointName];
 }
 
+- (void)startAvailabilityCheckForTouchpoint:(NSString *)touchpointName {
+    [super startAvailabilityCheckForTouchpoint:touchpointName];
+}
+
+- (BOOL)isAvailableTouchpoint:(NSString *)touchpointName {
+    return [super isAvailableTouchpoint:touchpointName];
+}
+
 - (void)setAge:(int)age {
     [super setAge:age];
 }
