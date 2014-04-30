@@ -145,6 +145,18 @@ BOOL __trialpayVerbose=YES;
 }
 
 /*
+ * Returns the mode name from enum (debug purposes)
+ */
++ (NSString *)viewModeString:(TPViewMode)mode {
+    switch (mode) {
+        case TPViewModeUnknown:
+        case TPViewModeFullscreen: return @"Fullscreen";
+        case TPViewModePopup: return @"Popup";
+    }
+    return @"UNKNOWN";
+}
+
+/*
  * Determine whether the app supports portrait and/or landscape orientations.
  * Returns a 2-bit mask, where minor bit indicates portrait support and major bit is landscape support:
  *   0 - neither orientation supported (this should never occur)
@@ -154,13 +166,16 @@ BOOL __trialpayVerbose=YES;
  */
 + (int)getBasicOrientationSupport {
     NSUInteger supportedOrientationMask;
+    int basicMask = 0;
     UIApplication *app = [UIApplication sharedApplication];
     if ([app.delegate respondsToSelector:@selector(application:supportedInterfaceOrientationsForWindow:)]) {
         supportedOrientationMask = [app.delegate application:app supportedInterfaceOrientationsForWindow:app.keyWindow];
-    } else {
+    } else if ([app respondsToSelector:@selector(supportedInterfaceOrientationsForWindow:)]) {
         supportedOrientationMask = [app supportedInterfaceOrientationsForWindow:app.keyWindow];
+    } else {
+        // iOS 5 does not support supportedInterfaceOrientationsForWindow:, lets consider the current orientation as the mask ...
+        supportedOrientationMask = (NSUInteger) (1 << [app statusBarOrientation]); // we are relying on the way apple calculated the masks
     }
-    int basicMask = 0;
     if (supportedOrientationMask & (UIInterfaceOrientationMaskPortrait | UIInterfaceOrientationMaskPortraitUpsideDown)) {
         basicMask += 1; // app supports portrait
     }

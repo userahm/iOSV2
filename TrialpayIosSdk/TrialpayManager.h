@@ -223,6 +223,13 @@ Note: the custom parameter value is being reset after opening the Offer Wall
 - (void)openTouchpoint:(NSString *)touchpointName;
 
 /*!
+    Open the touchpoint. This function can be used for Offerwall and Interstitial touchpoints. To use the PTM flow, call this function in popup mode.
+    @param touchpointName The touchpoint
+    @param mode Choose between fullscreen (like regular offerwall) and popup mode (for PTM flows)
+*/
+- (void)openTouchpoint:(NSString *)name withMode:(TPViewMode)mode;
+
+/*!
     Create the Trialpay Dealspot for a given touchpoint.
     @param touchpointName The touchpoint.
     @param touchpointFrame The frame for the touchpoint icon

@@ -104,7 +104,7 @@
         [self hideDealspotIcon];
         NSString* urlString = [request.URL.absoluteString substringFromIndex:24];
         [[BaseTrialpayManager sharedInstance] registerDealspotURL:urlString forTouchpoint:_touchpointName];
-        [[BaseTrialpayManager sharedInstance] openTouchpoint:_touchpointName];
+        [[BaseTrialpayManager sharedInstance] openTouchpoint:_touchpointName withMode:TPViewModeFullscreen];
         return NO;
     } else if ([url.absoluteString hasPrefix:@"trialpay://dsresizetouchpoint"]) {
         [self showDealspotIcon];

@@ -21,6 +21,8 @@
 @property (strong, nonatomic) id<TpOfferwallViewControllerDelegate> delegate;
 @property (strong, nonatomic) IBOutlet TpWebView *tpWebView;
 
+@property (nonatomic) TPViewMode viewMode;
+
 - (id)initWithTouchpointName:(NSString *)touchpointName;
 
 @end

@@ -40,7 +40,6 @@ static TpDataStore *__trialpayDataStoreSingleton;
 }
 
 - (NSMutableDictionary *)dataDictionary {
-    TPLogEnter;
     if (nil == _trialpayManagerDictionary) {
         NSString *path= [self path];
 

@@ -29,6 +29,13 @@ typedef enum {
     TPModeDealspot,
 } TPViewControllerMode;
 
+// Controls offerwall view presentation (fullscreen/popup)
+typedef enum {
+    TPViewModeUnknown,
+    TPViewModeFullscreen,
+    TPViewModePopup,
+} TPViewMode;
+
 // Create TPLog - a debug call available on debug mode only
 #ifdef DEBUG
 
@@ -74,6 +81,7 @@ NSLog(@"[TPLOG] [%50.50s] %@", \
 
 + (NSString *)genderCodeForValue:(Gender)gender;
 + (Gender)genderValueForCode:(NSString *)genderStr;
++ (NSString *)viewModeString:(TPViewMode)mode;
 @end
 
 @interface TpUserAgent : NSObject

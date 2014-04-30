@@ -118,7 +118,7 @@ static NSError *__lastError;
 #if defined(__TRIALPAY_USE_EXCEPTIONS)
     } @catch (NSException *exception) {
 #if DEBUG
-        TPLog(@"%@", [exception callStackSymbols]);
+        TPLog(@"%@\n%@", exception, [exception callStackSymbols]);
 #endif
         TPCustomerError(@"Trialpay Balance API executed with errors: {}", @"Trialpay Balance API executed with errors: %@", exception);
         __lastError = [NSError errorWithDomain:@"TrialpayBalanceAPI" code:3 userInfo:[NSDictionary dictionaryWithObjectsAndKeys:exception.description, NSLocalizedDescriptionKey, nil]];
@@ -167,7 +167,7 @@ static NSError *__lastError;
 #if defined(__TRIALPAY_USE_EXCEPTIONS)
     } @catch (NSException *exception) {
 #if DEBUG
-        TPLog(@"%@", [exception callStackSymbols]);
+        TPLog(@"%@\n%@", exception, [exception callStackSymbols]);
 #endif
         TPCustomerError(@"Trialpay Balance API executed with errors: {}", @"Trialpay Balance API executed with errors: %@", exception);
         __lastError = [NSError errorWithDomain:@"TrialpayBalanceAPI" code:3 userInfo:[NSDictionary dictionaryWithObjectsAndKeys:exception.description, NSLocalizedDescriptionKey, nil]];

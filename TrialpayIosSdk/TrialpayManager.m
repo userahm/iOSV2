@@ -40,11 +40,15 @@ static TrialpayManager *__trialpayManagerInstance;
 
 // deprecated - developers should call openTouchpoint instead
 - (void)openOfferwallForTouchpoint:(NSString *)touchpointName {
-    [super openTouchpoint:touchpointName];
+    [self openTouchpoint:touchpointName];
+}
+
+- (void)openTouchpoint:(NSString *)touchpointName withMode:(TPViewMode)mode {
+    [super openTouchpoint:touchpointName withMode:mode];
 }
 
 - (void)openTouchpoint:(NSString *)touchpointName {
-    [super openTouchpoint:touchpointName];
+    [super openTouchpoint:touchpointName  withMode:TPViewModeFullscreen];
 }
 
 - (TpDealspotView *)createDealspotViewForTouchpoint:(NSString *)touchpointName withFrame:(CGRect)touchpointFrame {

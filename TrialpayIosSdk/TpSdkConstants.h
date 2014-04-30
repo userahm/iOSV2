@@ -5,12 +5,16 @@
 
 // do not expose to users the following constants
 
+// required to build adobe (due to CGFloat)
+#import <CoreGraphics/CoreGraphics.h>
+
 extern NSString *kTPKeyBalance;
 extern NSString *kTPKeyUserCreationTime;
 extern NSString *kTPKeyVisitTimestamps;
 extern NSString *kTPKeyVisitLengths;
 extern NSString *kTPKeyTouchpointNames;
 extern NSString *kTPKeyDealspotURLs;
+extern NSString *kTPKeyIntegrationTypes;
 extern NSString *kTPKeyBalances;
 extern NSString *kTPKeyVICs;
 extern NSString *kTPKeyAge;
@@ -25,3 +29,22 @@ extern NSString *kTPKeySecondsValid;
 extern NSString *kTPKeyUseWebNavigationBar;
 extern NSString *kTPKeyVideoMetaData;
 extern NSString *kTPKeyVideoPrefix;
+
+extern NSString *kTPOfferContainer;
+extern NSString *kTPOfferwallContainer;
+
+extern NSString *kTPSDKEventTypeKey;
+extern NSString *kTPSDKEventSourceKey;
+extern NSString *kTPSDKEventNewStatusKey;
+extern NSString *kTPSDKEventURLKey;
+extern NSString *kTPSDKEventTypeContainerStatusChanged;
+extern NSString *kTPSDKEventTypePageStatusChanged;
+extern NSString *kTPSDKEventStatusLoadingStarted;
+extern NSString *kTPSDKEventStatusLoadingFinished;
+extern NSString *kTPSDKEventStatusClosed;
+
+
+extern CGFloat const kTpPopupDefaultIPhoneCornerRadius;
+extern CGFloat const kTpPopupDefaultIPadCornerRadius;
+extern CGFloat const kTpPopupVerticalMargin;
+extern CGFloat const kTpPopupHorizontalMargin;

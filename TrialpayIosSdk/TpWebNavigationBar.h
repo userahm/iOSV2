@@ -39,4 +39,6 @@
 
 - (void)switchToOfferMode;
 
+- (void)onSDKEvent:(NSDictionary *)aData;
+
 @end

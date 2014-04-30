@@ -35,6 +35,7 @@ extern NSString *TPBalanceUpdateActionString;  /*! The device user balance was u
 - (void)registerVic:(NSString *)vic withTouchpoint:(NSString *)touchpointName;
 
 - (void)openTouchpoint:(NSString *)touchpointName;
+- (void)openTouchpoint:(NSString *)touchpointName withMode:(TPViewMode)mode;
 
 - (TpDealspotView *)createDealspotViewForTouchpoint:(NSString *)touchpointName withFrame:(CGRect)touchpointFrame;
 
@@ -57,6 +58,8 @@ extern NSString *TPBalanceUpdateActionString;  /*! The device user balance was u
 
 - (void)startAvailabilityCheckForTouchpoint:(NSString *)touchpointName;
 - (BOOL)isAvailableTouchpoint:(NSString *)touchpointName;
+
+- (NSString *)getIntegrationTypeForTouchpoint:(NSString *)touchpointName;
 
 @property (strong, nonatomic) id<TrialpayManagerDelegate> delegate;
 @property (assign, nonatomic) __block BOOL isShowingOfferwall; // will be modified by a block

@@ -84,7 +84,8 @@ NSMutableArray* jsCommands;
     return YES;
 }
 
-
+- (void)webViewDidFinishLoad:(UIWebView *)webView {
+}
 
 - (void)executeCommand:(NSString *)jsCommand {
     TPLog(@"executeCommand:%@", jsCommand);
@@ -133,6 +134,23 @@ NSMutableArray* jsCommands;
 
 - (void)switchToOfferMode {
     [self executeCommand:@"switchToOfferMode()"];
+}
+
+- (void)onSDKEvent:(NSDictionary *)jsParams {
+#if defined(__TRIALPAY_USE_EXCEPTIONS)
+    @try {
+#endif
+        NSError *error;
+        NSData *jsonData = [NSJSONSerialization dataWithJSONObject:jsParams
+                                                           options:NSJSONWritingPrettyPrinted
+                                                             error:&error];
+        NSString *jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+        [self executeCommand:[NSString stringWithFormat:@"onSDKEvent(%@)", jsonString]];
+#if defined(__TRIALPAY_USE_EXCEPTIONS)
+    @catch (NSException *exception) {
+        TPLog(@"%@\n%@", exception, [exception callStackSymbols]);
+    }
+#endif
 }
 
 @end

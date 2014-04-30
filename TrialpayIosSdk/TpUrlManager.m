@@ -9,6 +9,7 @@
 #import "TpDataStore.h"
 #import "TpArcSupport.h"
 #import "TrialpayManager.h"
+#import "TpVideo.h"
 
 // Terminator for buildQueryString, intentionally asymmetric
 #define TP_END_QUERY @"__**TPENDQUERY*_*_"
@@ -151,22 +152,24 @@ TpUrlManager *__TrialPayURLManagerSingleton = nil;
 }
 
 - (NSString *)offerwallUrlForTouchpoint:(NSString *)touchpointName {
-    // if its a dealspot, than return the registered URL, otherwise build the offerwall url
-    NSMutableString *url = [[[BaseTrialpayManager sharedInstance] urlForDealspotTouchpoint:touchpointName] mutableCopy];
-    if (!url) {
+    // If this is dealspot then return the registered URL, otherwise build the offerwall url
+    NSMutableString *url;
+    NSString *integrationType = [[BaseTrialpayManager sharedInstance] getIntegrationTypeForTouchpoint:touchpointName];
+    if ([integrationType isEqualToString:@"offerwall"]) {
         NSDictionary *data = [TpUrlManager getVicAndSid:touchpointName];
         if (!data)
             return nil;
-        
+
         url = [NSMutableString stringWithFormat:@"%@%@?",
                [TpUrlManager getPrefixUrl:TPOfferwallDispatchPrefixUrl],
                [TpUrlManager URLEncodeQueryString:[data objectForKey:@"vic"]]];
         [self addCommonQueryParams:touchpointName toUrl:url];
     } else {
         // DS offer URL does not contain common query params
+        url = [[[BaseTrialpayManager sharedInstance] urlForDealspotTouchpoint:touchpointName] mutableCopy];
         [url appendFormat:@"&%@", [TpUrlManager buildQueryString:@"tp_base_page", @"1", TP_END_QUERY]];
     }
-    
+
     return url;
 }
 
@@ -224,6 +227,7 @@ TpUrlManager *__TrialPayURLManagerSingleton = nil;
             @"idfa", [TpUtils idfa],
             @"mac", [TpUtils macAddress],
             @"sdkver", [[BaseTrialpayManager sharedInstance] sdkVersion],
+            @"loaded_vts", [[[TpVideo sharedInstance] getAllStoredVideoOffers] componentsJoinedByString:@"-"],
             @"tp_base_page", @"1",
             TP_END_QUERY]];
 

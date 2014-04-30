@@ -14,8 +14,9 @@
 
 - (void)pruneVideoStorage;
 
-- (void)initializeVideo:(NSString *)downloadURL withParams:(NSDictionary *)params;
+- (void)initializeVideoWithParams:(NSDictionary *)params;
 - (BOOL)isResourceReady:(NSString *)downloadURL;
+- (NSArray *)getAllStoredVideoOffers;
 
 - (void)fireImpressionForURL:(NSString *)downloadURL;
 - (void)fireClickForURL:(NSString *)downloadURL;
@@ -23,8 +24,9 @@
 
 - (void)hideStatusBar;
 
-- (void)playVideoWithURL:(NSString *)downloadURL;
+- (void)playVideoWithURL:(NSString *)downloadURL fromViewController:(UIViewController *)baseViewController withBlock:(void (^)(void))completionBlock;
 - (void)openEndcap:(NSString *)downloadURL;
 - (void)openAppStore;
+- (void)closeTrailer;
 
 @end

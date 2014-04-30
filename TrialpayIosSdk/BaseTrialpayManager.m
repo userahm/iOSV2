@@ -25,9 +25,9 @@ NSString *TPBalanceUpdateActionString  = @"balance_update";
 
 @interface BaseTrialpayManager ()
 - (int)checkBalance;
-- (int)checkInterstitialAvailabilityForTouchpoint:(NSString *)touchpointName;
+- (int)checkAvailabilityForTouchpoint:(NSString *)touchpointName;
 - (void)stopAvailabilityCheckForTouchpoint:(NSString *)touchpointName;
-- (int)interstitialAvailabilityErrorTimeForTouchpoint:(NSString *)touchpointName;
+- (int)availabilityErrorTimeForTouchpoint:(NSString *)touchpointName;
 
 @property (nonatomic) NSTimeInterval userSessionTimeout; // To allow change on value
 @end
@@ -59,7 +59,7 @@ NSString *TPBalanceUpdateActionString  = @"balance_update";
 #if defined(__TRIALPAY_USE_EXCEPTIONS)
             }
             @catch (NSException *exception) {
-                TPLog(@"%@", [exception callStackSymbols]);
+                TPLog(@"%@\n%@", exception, [exception callStackSymbols]);
             }
 #endif
         }
@@ -80,7 +80,7 @@ NSString *TPBalanceUpdateActionString  = @"balance_update";
             @try {
 #endif
                 TPLog(@"Loop availability check for touchpoint %@", self.touchpointName);
-                secondsValid = [[BaseTrialpayManager sharedInstance] checkInterstitialAvailabilityForTouchpoint:self.touchpointName];
+                secondsValid = [[BaseTrialpayManager sharedInstance] checkAvailabilityForTouchpoint:self.touchpointName];
                 if (secondsValid <= 0) {
                     secondsValid = TP_AVAILABILITY_DEFAULT_VALIDITY_TIME;
                 }
@@ -89,7 +89,11 @@ NSString *TPBalanceUpdateActionString  = @"balance_update";
 #if defined(__TRIALPAY_USE_EXCEPTIONS)
             }
             @catch (NSException *exception) {
-                TPLog(@"%@", [exception callStackSymbols]);
+                TPLog(@"%@\n%@", exception, [exception callStackSymbols]);
+                // check if operation should be cancelled - needed to prevent running operation on invalid touchpoint for example.
+                if ([[[NSThread currentThread].threadDictionary valueForKey:@"cancelOperation"] boolValue]) {
+                    [self cancel];
+                }
             }
 #endif
         }
@@ -258,7 +262,7 @@ NSMutableDictionary *customParams = nil;
 
 #pragma mark - Get SDK Version
 - (NSString*)sdkVersion {
-    return @"ios.2.2014120";
+    return @"ios.2.2014173";
 }
 
 #pragma mark - BaseTrialpayManager getter/setter
@@ -321,34 +325,37 @@ NSMutableDictionary *customParams = nil;
     TPLog(@"registerVic:%@, withTouchpoint:%@", vic, touchpointName);
     // Get preregistered names
     NSMutableDictionary *touchpointNames = [self touchpointNames];
-    // If the name is there and is set correctly - skip
+    // Confirm that the name is not already present.
     NSString *oldVic = [touchpointNames valueForKey:touchpointName];
-    if ([vic isEqualToString:oldVic]) {
-        return;
-    }
-    if (nil != oldVic) {
-        TPCustomerWarning(@"Reassigning touchpoint [] to vic", @"Reassigning touchpoint to vic '%@' (previously '%@')", vic, oldVic);
+    if (![vic isEqualToString:oldVic]) {
+        if (nil != oldVic) {
+            TPCustomerWarning(@"Reassigning touchpoint [] to vic", @"Reassigning touchpoint to vic '%@' (previously '%@')", vic, oldVic);
+        }
+
+        // Are we trying to reassign vic to another touchpoint?
+        NSString *oldTouchpoint = [self touchpointForVic:vic];
+        if (nil != oldTouchpoint) {
+            // Than lets warn and remove old association...
+            TPCustomerWarning(@"Reassigning vic [] to touchpoint", @"Reassigning vic to touchpoint '%@' (previously '%@')", touchpointName, oldTouchpoint);
+            [touchpointNames removeObjectForKey:oldTouchpoint];
+        }
+
+        // Get the list of vics
+        NSMutableArray *vics = [self vics];
+        // If the new VIC name does not exist in the list (expected) add the vic to the vic list
+        if (![vics containsObject:vic]) {
+            [vics addObject:vic];
+            [[TpDataStore sharedInstance] setDataWithValue:vics forKey:kTPKeyVICs];
+        }
+
+        // Register the vic under the given touchpointName
+        [touchpointNames setValue:vic forKey:touchpointName];
+        [[TpDataStore sharedInstance] setDataWithValue:touchpointNames forKey:kTPKeyTouchpointNames];
     }
 
-    // R we trying to re-assign vic to another touchpoint?
-    NSString *oldTouchpoint = [self touchpointForVic:vic];
-    if (nil != oldTouchpoint) {
-        // Than lets warn and remove old association...
-        TPCustomerWarning(@"Reassigning vic [] to touchpoint", @"Reassigning vic to touchpoint '%@' (previously '%@')", touchpointName, oldTouchpoint);
-        [touchpointNames removeObjectForKey:oldTouchpoint];
-    }
-
-    // Get the list of vics
-    NSMutableArray *vics = [self vics];
-    // If the new VIC name does not exist in the list (expected) add the vic to the vic list
-    if (![vics containsObject:vic]) {
-        [vics addObject:vic];
-        [[TpDataStore sharedInstance] setDataWithValue:vics forKey:kTPKeyVICs];
-    }
-
-    // Register the vic under the given touchpointName
-    [touchpointNames setValue:vic forKey:touchpointName];
-    [[TpDataStore sharedInstance] setDataWithValue:touchpointNames forKey:kTPKeyTouchpointNames];
+    // Check availability. For interstitial touchpoints this determines which offer we show. For other touchpoints this
+    // preloads any video trailer offers.
+    [self startAvailabilityCheckForTouchpoint:touchpointName];
 }
 
 - (NSString *)vicForTouchpoint:(NSString *)touchpointName {
@@ -379,10 +386,13 @@ NSMutableDictionary *customParams = nil;
 
 - (void)registerDealspotURL:(NSString *)urlString forTouchpoint:(NSString *)touchpointName {
     if (nil == touchpointName) {
+        // We have to cancel the availability operation (dont have pointer to operation here)
+        [[NSThread currentThread].threadDictionary setValue:@YES forKey:@"cancelOperation"];
         [NSException raise:@"TrialpayAPIException" format:@"Provide a valid (non-null) touchpointName name for registerDealspotURL:forTouchpoint:"];
     }
     if (nil == [[self touchpointNames] objectForKey:touchpointName]) {
-        [NSException raise:@"TrialpayAPIException" format:@"TouchpointName must be registered with registerVic:withTouchpoint:"];
+        [[NSThread currentThread].threadDictionary setValue:@YES forKey:@"cancelOperation"];
+        [NSException raise:@"TrialpayAPIException" format:@"TouchpointName (%@) must be registered with registerVic:withTouchpoint:", touchpointName];
     }
 
     NSMutableDictionary *dsUrls = [[TpDataStore sharedInstance] dataValueForKey:kTPKeyDealspotURLs];
@@ -398,13 +408,35 @@ NSMutableDictionary *customParams = nil;
     [[TpDataStore sharedInstance] setDataWithValue:dsUrls forKey:kTPKeyDealspotURLs];
 }
 
+// It should happen that only a dealspot or interstitial touchpoint will have a dealspotURL registered,
+// but this is not guaranteed. (Exceptions include remapped touchpoints.) To determine whether this is
+// a dealspot touchpoint, call getIntegrationTypeForTouchpoint:.
+//
+// Return value may be nil.
 - (NSString *)urlForDealspotTouchpoint:(NSString *)touchpointName {
     TPLog(@"urlForDealspotTouchpoint:%@", touchpointName);
     NSDictionary *dsUrls = [[TpDataStore sharedInstance] dataValueForKey:kTPKeyDealspotURLs];
 
     NSString *urlString = [dsUrls valueForKey:touchpointName];
-    // no warning on nil, as its also used to check if its a dealspot or not on TpOfferwallViewController
     return urlString;
+}
+
+- (void)setIntegrationType:(NSString *)typeString forTouchpoint:(NSString *)touchpointName {
+    NSMutableDictionary *integrationTypes = [[TpDataStore sharedInstance] dataValueForKey:kTPKeyIntegrationTypes];
+    if (integrationTypes == nil) {
+        integrationTypes = [[[NSMutableDictionary alloc] init] TP_AUTORELEASE];
+    }
+    [integrationTypes setObject:typeString forKey:touchpointName];
+    [[TpDataStore sharedInstance] setDataWithValue:integrationTypes forKey:kTPKeyIntegrationTypes];
+}
+
+- (NSString *)getIntegrationTypeForTouchpoint:(NSString *)touchpointName {
+    NSDictionary *integrationTypes = [[TpDataStore sharedInstance] dataValueForKey:kTPKeyIntegrationTypes];
+    NSString *typeString = [integrationTypes valueForKey:touchpointName];
+    if (typeString == nil) {
+        typeString = @"unknown";
+    }
+    return typeString;
 }
 
 /*
@@ -515,7 +547,11 @@ NSMutableDictionary *customParams = nil;
 #pragma mark - openTouchpoint
 
 - (void)openTouchpoint:(NSString *)touchpointName {
-    TPLog(@"openTouchpoint:%@", touchpointName);
+    [self openTouchpoint:touchpointName withMode:TPViewModeFullscreen];
+}
+
+- (void)openTouchpoint:(NSString *)touchpointName withMode:(TPViewMode)mode {
+    TPLog(@"openTouchpoint:%@ withMode:%@", touchpointName, [TpUtils viewModeString:mode]);
     BOOL isAvailable = [self isAvailableTouchpoint:touchpointName];
     if (!isAvailable) {
         TPCustomerWarning(@"Touchpoint is not available and will not be opened", @"Touchpoint %@ is not available and will not be opened", touchpointName);
@@ -526,19 +562,38 @@ NSMutableDictionary *customParams = nil;
     _isShowingOfferwall = YES;
     TPLog(@"isShowingOfferwall YES");
 
-    // Check for the video trailer flow, which does not use the normal webview.
-    NSString *dealspotURL = [self urlForDealspotTouchpoint:touchpointName];
-    if ([dealspotURL hasPrefix:kTPKeyVideoPrefix]) {
-        NSString *videoResourceURL = [dealspotURL substringFromIndex:[kTPKeyVideoPrefix length]];
-        [[TpVideo sharedInstance] playVideoWithURL:videoResourceURL];
-        return;
+    UIViewController *rootViewController = [UIApplication sharedApplication].keyWindow.rootViewController;
+
+    // Check for the video trailer interstitial flow, which does not use the normal webview.
+    NSString *integrationType = [self getIntegrationTypeForTouchpoint:touchpointName];
+    if ([integrationType isEqualToString:@"interstitial"]) {
+        NSString *dealspotURL = [self urlForDealspotTouchpoint:touchpointName];
+        if ([dealspotURL hasPrefix:kTPKeyVideoPrefix]) {
+            NSString *videoResourceURL = [dealspotURL substringFromIndex:[kTPKeyVideoPrefix length]];
+            [[TpVideo sharedInstance] playVideoWithURL:videoResourceURL fromViewController:rootViewController withBlock:^{
+                // We're showing the video trailer directly, outside of TpOfferwallViewController, so we'll need to
+                // set _isShowingOfferwall to NO once we exit the video trailer flow.
+                [BaseTrialpayManager sharedInstance].isShowingOfferwall = NO;
+                TPLog(@"isShowingOfferwall NO");
+            }];
+            return;
+        }
     }
 
+    // Create and present the offerwall view controller (this is also used for dealspot).
     TpOfferwallViewController *tpOfferwall = [[TpOfferwallViewController alloc] initWithTouchpointName:touchpointName];
+    tpOfferwall.viewMode = mode;
+
+    // show with previous view on the background
+    // TODO: the presentation style actually causes the show animation to not happen
+    if (mode == TPViewModePopup) {
+        rootViewController.modalPresentationStyle = UIModalPresentationCurrentContext;
+    }
+
+    [rootViewController presentViewController:tpOfferwall animated:YES completion:nil];
     tpOfferwall.delegate = self;
 
-    UIViewController *root = [UIApplication sharedApplication].keyWindow.rootViewController;
-    [root presentViewController:tpOfferwall animated:YES completion:nil];
+    [tpOfferwall TP_RELEASE];
 
     dispatch_async(dispatch_get_main_queue(), ^{
         if (self.delegate) {
@@ -553,9 +608,7 @@ NSMutableDictionary *customParams = nil;
                 [self.delegate trialpayManager:(TrialpayManager *)self offerwallDidOpenForTouchpoint:touchpointName];
             }
         }
-        // TODO: no block interface for now.
     });
-    [tpOfferwall TP_RELEASE];
 }
 
 #pragma mark - Balance
@@ -808,17 +861,27 @@ NSMutableDictionary *__interstitialAvailabilityChecks = nil;
 
 NSMutableDictionary *_interstitialAvailabilityErrorWaitTimes = nil;
 
-// returns the validity time, in seconds, until we should check availability again
-- (int)checkInterstitialAvailabilityForTouchpoint:(NSString *)touchpointName {
+// Hit the geo availability API for information on whether the touchpoint is available, or to poll for
+// video trailers to preload. (Behavior depends on the integration type.)
+//
+// This also retrieves and stores the integration type of the touchpoint ('offerwall', 'interstitial', or 'dealspot').
+//
+// Returns the validity time, in seconds, until we should check availability again.
+- (int)checkAvailabilityForTouchpoint:(NSString *)touchpointName {
     int validity_time;
+    NSString *integrationType = [self getIntegrationTypeForTouchpoint:touchpointName];
 
-    // Mark the touchpoint as unavailable until the API request completes.
-    [self registerDealspotURL:@"" forTouchpoint:touchpointName];
+    // Note: we'll only have the integration type if we've previously retrieved availability information. On our
+    // first request the integration type is unknown.
+    if ([integrationType isEqualToString:@"interstitial"]) {
+        // Mark the touchpoint as unavailable until the API request completes.
+        [self registerDealspotURL:@"" forTouchpoint:touchpointName];
+    }
 
     // get the availability URL
     NSString *userAgent = [TpUserAgent sharedInstance].userAgent;
     NSString *availabilityURL = [[TpUrlManager sharedInstance] dealspotAvailabilityUrlForTouchpoint:touchpointName userAgent:userAgent];
-    TPLog(@"Interstitial Availability URL for touchpoint %@: %@", touchpointName, availabilityURL);
+    TPLog(@"Availability URL for touchpoint %@: %@", touchpointName, availabilityURL);
     if (availabilityURL == nil) {
         validity_time = TP_AVAILABILITY_DEFAULT_VALIDITY_TIME;
         return validity_time;
@@ -828,13 +891,13 @@ NSMutableDictionary *_interstitialAvailabilityErrorWaitTimes = nil;
     NSError *downloadError = nil;
     NSData *responseData = [NSData dataWithContentsOfURL:[NSURL URLWithString:availabilityURL] options:NSDataReadingMappedIfSafe error:&downloadError];
     if (downloadError) {
-        TPCustomerError(@"TrialPay API Dealspot Availability Query Error", @"TrialPay API Dealspot Availability query error for touchpoint %@: %@", touchpointName, downloadError);
-        validity_time = [self interstitialAvailabilityErrorTimeForTouchpoint:touchpointName];
+        TPCustomerError(@"TrialPay API Availability Query Error", @"TrialPay API Availability query error for touchpoint %@: %@", touchpointName, downloadError);
+        validity_time = [self availabilityErrorTimeForTouchpoint:touchpointName];
         return validity_time;
     }
     if (responseData == nil) {
-        TPCustomerError(@"Trialpay API Dealspot Availability Query did not return data. Please verify setup and parameters.", @"Trialpay API Dealspot Availability query for touchpoint %@ did not return data. Please verify setup and parameters.", touchpointName);
-        validity_time = [self interstitialAvailabilityErrorTimeForTouchpoint:touchpointName];
+        TPCustomerError(@"Trialpay API Availability Query did not return data. Please verify setup and parameters.", @"Trialpay API Availability query for touchpoint %@ did not return data. Please verify setup and parameters.", touchpointName);
+        validity_time = [self availabilityErrorTimeForTouchpoint:touchpointName];
         return validity_time;
     }
 
@@ -842,7 +905,7 @@ NSMutableDictionary *_interstitialAvailabilityErrorWaitTimes = nil;
     NSError *decodeError = nil;
     NSDictionary *availabilityInfo = [NSJSONSerialization JSONObjectWithData:responseData options:0 error:&decodeError];
     if (decodeError) {
-        TPCustomerError(@"TrialPay API Dealspot Availability Results Error", @"TrialPay API Dealspot Availability results error for Touchpoint %@: %@", touchpointName, downloadError);
+        TPCustomerError(@"TrialPay API Availability Results Error", @"TrialPay API Availability results error for Touchpoint %@: %@", touchpointName, downloadError);
         validity_time = TP_AVAILABILITY_DEFAULT_VALIDITY_TIME;
         return validity_time;
     }
@@ -853,54 +916,63 @@ NSMutableDictionary *_interstitialAvailabilityErrorWaitTimes = nil;
     } else {
         validity_time = TP_AVAILABILITY_DEFAULT_VALIDITY_TIME;
     }
-    NSString *dealspotURL;
-    NSString *responseType = [availabilityInfo objectForKey:@"type"];
-    if ([responseType isEqualToString:@"web"]) {
-        dealspotURL = [availabilityInfo objectForKey:@"url"];
-    } else if ([responseType isEqualToString:@"video_trailer"]) {
-        NSString *downloadURL = [availabilityInfo objectForKey:@"dl_url"];
-        // cd_text may not be supplied
-        NSString *countdownText = [availabilityInfo objectForKey:@"cd_text"] ? [availabilityInfo objectForKey:@"cd_text"] : @"";
-        // Convert the text color string to the UIColor name
-        NSString *textColor = [NSString stringWithFormat:@"%@Color", [availabilityInfo objectForKey:@"tc"]];
-        // Convert the expiration time from a time interval to a date
-        NSDate *expirationTime = [NSDate dateWithTimeIntervalSinceNow:[[availabilityInfo objectForKey:@"exp"] intValue]];
-
-        NSDictionary *videoParams = [NSDictionary dictionaryWithObjectsAndKeys:
-            [availabilityInfo objectForKey:@"toi_url"],         @"impressionURL",
-            [availabilityInfo objectForKey:@"ck_url"],          @"clickURL",
-            [availabilityInfo objectForKey:@"cn_url"],          @"completionURL",
-            [availabilityInfo objectForKey:@"ec_url"],          @"endcapURL",
-            [availabilityInfo objectForKey:@"ec_ck_url"],       @"endcapClickURL",
-            [availabilityInfo objectForKey:@"app_id"],          @"appID",
-            [availabilityInfo objectForKey:@"completion_time"], @"completionTime",
-            [availabilityInfo objectForKey:@"exit_delay"],      @"exitButtonDelay",
-            [availabilityInfo objectForKey:@"use_cd"],          @"isShowCountdown",
-            countdownText,                                      @"countdownText",
-            textColor,                                          @"textColor",
-            expirationTime,                                     @"expirationTime",
-            nil];
-        // Store video offer attributes and begin downloading the video to local storage.
-        [[TpVideo sharedInstance] initializeVideo:(NSString *)downloadURL withParams:videoParams];
-
-        dealspotURL = [NSString stringWithFormat:@"%@%@", kTPKeyVideoPrefix, downloadURL];
-    } else {
-        dealspotURL = [NSString stringWithFormat:@""];
-    }
-
 
     // remove the error wait time for this touchpoint, if one is stored
     if (_interstitialAvailabilityErrorWaitTimes != nil) {
         [_interstitialAvailabilityErrorWaitTimes removeObjectForKey:touchpointName];
     }
 
-    // save URL and return
-    [self registerDealspotURL:dealspotURL forTouchpoint:touchpointName];
+    // Process the response. The integration type determines the actions we take.
+    integrationType = [availabilityInfo objectForKey:@"integration_type"];
+    if (integrationType == nil) {
+        // This should always be returned, but we want to catch it if it somehow isn't.
+        // Otherwise the whole app would crash when we try to store a nil value.
+        integrationType = @"unknown"; // Mark the touchpoint as unavailable.
+    }
+    [self setIntegrationType:integrationType forTouchpoint:touchpointName];
+    if ([integrationType isEqualToString:@"interstitial"]) {
+        NSString *contentType = [availabilityInfo objectForKey:@"type"];
+        NSString *dealspotURL;
+
+        if ([contentType isEqualToString:@"web"]) {
+            // This is a non-video-trailer offer. Just set the url as the dealspotURL.
+            dealspotURL = [availabilityInfo objectForKey:@"url"];
+        } else if ([contentType isEqualToString:@"video_trailer"]) {
+            // This is a video trailer. Store video offer attributes and begin downloading the video to local storage.
+            [[TpVideo sharedInstance] initializeVideoWithParams:availabilityInfo];
+
+            // Assign a dealspot URL which will cause us to enter the video trailer flow when the touchpoint is opened.
+            NSString *downloadURL = [availabilityInfo objectForKey:@"dl_url"];
+            dealspotURL = [NSString stringWithFormat:@"%@%@", kTPKeyVideoPrefix, downloadURL];
+        } else {
+            TPLog(@"Received unexpected contentType %@ for interstitial touchpoint. Touchpoint will be unavailable.", contentType);
+            dealspotURL = @""; // Mark this touchpoint as unavailable.
+        }
+
+        [self registerDealspotURL:dealspotURL forTouchpoint:touchpointName];
+    } else {
+        // This is either an offerwall or (non-interstitial) dealspot integration. We should get a list (possibly empty) of video offers to preload.
+        NSArray *videoTrailers = [availabilityInfo objectForKey:@"video_trailers"];
+        if (videoTrailers != nil) {
+            // Store video offer attributes and begin downloading the videos to local storage.
+            // The videoTrailers array can be empty, which is a valid response.
+            if ([[[UIDevice currentDevice] systemVersion] floatValue] >= 7.0) {
+                // Right now there's a strange crash that can happen when loading video trailers from the OW in iOS 6.
+                // Until we track down and fix the cause, don't load video trailers in non-interstitial touchpoints.
+                for (NSDictionary *videoTrailerData in videoTrailers) {
+                    [[TpVideo sharedInstance] initializeVideoWithParams:videoTrailerData];
+                }
+            }
+        } else {
+            TPLog(@"video_trailers was not set on response to non-interstitial touchpoint %@. This should never happen.", touchpointName);
+        }
+    }
+
     return validity_time;
 }
 
 // return the time in seconds when we should retry the availability check
-- (int)interstitialAvailabilityErrorTimeForTouchpoint:(NSString *)touchpointName {
+- (int)availabilityErrorTimeForTouchpoint:(NSString *)touchpointName {
     if (_interstitialAvailabilityErrorWaitTimes == nil) {
         _interstitialAvailabilityErrorWaitTimes = [[NSMutableDictionary alloc] init];
     }
@@ -923,18 +995,26 @@ NSMutableDictionary *_interstitialAvailabilityErrorWaitTimes = nil;
 }
 
 - (BOOL)isAvailableTouchpoint:(NSString *)touchpointName; {
-    NSString *dealspotURL = [self urlForDealspotTouchpoint:touchpointName];
-    if (dealspotURL == nil) {
-        // small hack: we assume that actual DS touchpoints will have registered a URL, which means this is an OW touchpoint and is always available
-        return YES;
-    } else if ([dealspotURL isEqual:@""]) {
-        // we store an empty string when the availability check fails
+    NSString *integrationType = [self getIntegrationTypeForTouchpoint:touchpointName];
+    if ([integrationType isEqualToString:@"unknown"]) {
+        // An unknown integration type means we haven't yet completed an availability check for this touchpoint.
+        // Without the integration type we don't have enough information to confirm availability, so return NO.
         return NO;
-    } else if ([dealspotURL hasPrefix:kTPKeyVideoPrefix]) {
-        NSString *videoResourceURL = [dealspotURL substringFromIndex:[kTPKeyVideoPrefix length]];
-        return [[TpVideo sharedInstance] isResourceReady:videoResourceURL];
-    } else {
+    } else if ([integrationType isEqualToString:@"offerwall"]) {
+        // Return YES - offerwalls are always available.
         return YES;
+    } else {
+        // This is either an interstitial or dealspot touchpoint. Look at the dealspot URL to determine availability.
+        NSString *dealspotURL = [self urlForDealspotTouchpoint:touchpointName];
+        if ((dealspotURL == nil) || [dealspotURL isEqualToString:@""]) {
+            return NO;
+        } else if ([dealspotURL hasPrefix:kTPKeyVideoPrefix]) {
+            // This is an interstitial touchpoint loaded with a video trailer offer. Check if the trailer has been preloaded.
+            NSString *videoResourceURL = [dealspotURL substringFromIndex:[kTPKeyVideoPrefix length]];
+            return [[TpVideo sharedInstance] isResourceReady:videoResourceURL];
+        } else {
+            return YES;
+        }
     }
 }
 

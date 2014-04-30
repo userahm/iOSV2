@@ -8,4 +8,9 @@
 #import <UIKit/UIKit.h>
 
 @interface TpVideoEndcapViewController : UIViewController
+
+- (void)hideNativeExitButton;
+
+@property (assign, nonatomic) BOOL shouldShowExitButton;
+
 @end

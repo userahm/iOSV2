@@ -7,15 +7,19 @@
 
 #import <UIKit/UIKit.h>
 #import "TpNavigationBarDelegate.h"
+#import "TpUtils.h"
 
 @class TpWebView;
 @class TpWebNavigationBar;
 
 @protocol TpWebViewDelegate<NSObject>
 - (void)tpWebView:(TpWebView *)tpWebView donePushed:(id)sender;
+
+// Present the video from the delegate view controller
+- (void)playVideoWithURL:(NSString *)videoResourceURL;
 @end
 
-@interface TpWebView : UIView <UIWebViewDelegate, TpNavigationBarDelegate, UIAlertViewDelegate>
+@interface TpWebView : UIView <UIWebViewDelegate, TpNavigationBarDelegate, UIAlertViewDelegate, UIGestureRecognizerDelegate>
 
 @property (strong, nonatomic) IBOutlet UIView *mainView;
 @property (strong, nonatomic) IBOutlet UIBarButtonItem *doneButton;
@@ -25,7 +29,8 @@
 @property (strong, nonatomic) IBOutlet UIToolbar *navigationBar;
 
 @property (strong, nonatomic) id<TpWebViewDelegate> delegate;
-@property (nonatomic, strong) TpWebNavigationBar *webNavigationBar;
+@property (strong, nonatomic) TpWebNavigationBar *webNavigationBar;
+@property (assign, nonatomic) TPViewMode viewMode;
 
 - (BOOL)loadWebViewTouchpoint:(NSString *)touchpointName;
 - (void)loadRequest:(NSString *)urlString;

@@ -10,9 +10,12 @@
 #import "TpWebNavigationBar.h"
 #import "BaseTrialpayManager.h"
 #import "TpArcSupport.h"
-#import "TpDataStore.h"
+#import "TpSdkConstants.h"
 
-@interface TpWebView()
+@interface TpWebView() {
+    CGAffineTransform prevTransform;
+}
+
 @property (strong) NSString *initialUrl;
 @property (strong) UIWebView *webViewContainer;
 @property (strong) UIBarButtonItem *flexibleSpaceArea;
@@ -35,6 +38,7 @@
     TPLogEnter;
     self = [super initWithFrame:frame];
     if (self) {
+        self.autoresizesSubviews = YES;
         self.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         self.initialUrl = nil;
     }
@@ -83,14 +87,13 @@
 - (UIView *)buildWebNavigationBarWithWidth:(CGFloat)width height:(CGFloat)height {
     CGRect frame = CGRectMake(0.0, 0.0, width, height);
     self.webNavigationBar = [[[TpWebNavigationBar alloc] initWithFrame:frame touchpointName:self.currentTouchpointName] TP_AUTORELEASE];
-    
+
     self.webNavigationBar.autoresizesSubviews = YES;
     self.webNavigationBar.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     self.webNavigationBar.clearsContextBeforeDrawing = NO;
     self.webNavigationBar.contentMode = UIViewContentModeScaleToFill;
     self.webNavigationBar.hidden = NO;
     self.webNavigationBar.multipleTouchEnabled = NO;
-    self.webNavigationBar.scalesPageToFit = NO;
     self.webNavigationBar.userInteractionEnabled = YES;
 
     self.webNavigationBar.tpDelegate = self;
@@ -149,11 +152,9 @@
 
 - (UIView *)buildViewWithNavigationBarAndWidth:(CGFloat)width height:(CGFloat)height {
     // Build offerwallContainer
-    UIApplication *application = [UIApplication sharedApplication];
-    float statusBarHeight = MIN(application.statusBarFrame.size.width, application.statusBarFrame.size.height);
     float navBarHeight = 44.0;
 
-    self.offerwallContainer = [[[UIWebView alloc] initWithFrame:CGRectMake(0.0, navBarHeight, width, height-(navBarHeight +statusBarHeight))] TP_AUTORELEASE];
+    self.offerwallContainer = [[[UIWebView alloc] initWithFrame:CGRectMake(0.0, navBarHeight, width, height-navBarHeight)] TP_AUTORELEASE];
     
     self.offerwallContainer.alpha = 1.000;
     self.offerwallContainer.autoresizesSubviews = YES;
@@ -176,7 +177,7 @@
     [self.offerwallContainer setScalesPageToFit:YES];
     
     // Build main view (container)
-    self.mainView = [[[UIView alloc] initWithFrame:CGRectMake(0.0, statusBarHeight, width, height-statusBarHeight)] TP_AUTORELEASE];
+    self.mainView = [[[UIView alloc] initWithFrame:CGRectMake(0.0, 0.0, width, height)] TP_AUTORELEASE];
     self.mainView.alpha = 1.000;
     self.mainView.autoresizesSubviews = YES;
     self.mainView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -190,7 +191,6 @@
     self.mainView.tag = 0;
     self.mainView.userInteractionEnabled = YES;
 
-#warning TODO: UPDATE TO ALWAYS USE WEB HEADER
     if ([[BaseTrialpayManager sharedInstance] useWebNavigationBar]) {
         [self.mainView addSubview:[self buildWebNavigationBarWithWidth:width height:navBarHeight]];
     } else {
@@ -206,9 +206,35 @@
  * Returns the "name" of the UIWebView element for logging purposes
  */
 - (NSString *)getWebViewName:(UIWebView *)webView {
-    return [webView isEqual:self.offerwallContainer] ? @"offerwallContainer" : @"offerContainer";
+    return [webView isEqual:self.offerwallContainer] ? kTPOfferwallContainer : kTPOfferContainer;
 }
 
+#pragma mark - Popup mode
+- (void)setupAsPopup {
+    // setup content view (has webviews): shadow, corners,
+    self.mainView.autoresizingMask = (UIViewAutoresizingFlexibleTopMargin |
+            UIViewAutoresizingFlexibleLeftMargin |
+            UIViewAutoresizingFlexibleBottomMargin |
+            UIViewAutoresizingFlexibleRightMargin);
+    self.mainView.layer.shadowColor = [[UIColor blackColor] CGColor];
+    self.mainView.layer.shadowOffset = CGSizeMake(6, 6);
+    self.mainView.layer.shadowOpacity = 0.7;
+    self.mainView.layer.cornerRadius = ([UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPad ? kTpPopupDefaultIPadCornerRadius : kTpPopupDefaultIPhoneCornerRadius);
+//    self.mainView.layer.masksToBounds = YES;
+    self.mainView.autoresizesSubviews = YES;
+
+    // setup as clickable background view
+    self.autoresizingMask = (UIViewAutoresizingFlexibleHeight | UIViewAutoresizingFlexibleWidth);
+    self.backgroundColor = [UIColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:0.5];
+    self.layer.cornerRadius = 0;
+
+    // Tapping outside closes the popup - Keeping code as a safe behavior on connectivity issues
+    UITapGestureRecognizer *tapGesture = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(doneButtonPushed:)];
+    tapGesture.delegate = self;
+    [self addGestureRecognizer:tapGesture];
+}
+
+#pragma mark - Layout
 /*
  * Being called when the view is being drawn
  *
@@ -217,19 +243,42 @@
 - (void)layoutSubviews {
     TPLog(@"layoutSubviews");
     [super layoutSubviews];
+
     UIApplication *application = [UIApplication sharedApplication];
     float statusBarHeight = MIN(application.statusBarFrame.size.width, application.statusBarFrame.size.height);
-    
+
+    // Setup margins for popup
+    CGFloat horizontalMargin = 0;
+    CGFloat verticalMargin = 0;
+    if (self.viewMode == TPViewModePopup) {
+        horizontalMargin = kTpPopupHorizontalMargin;
+        verticalMargin = kTpPopupVerticalMargin;
+    }
+
+    // ViewController::edgesForExtendedLayout is not working, so we will need to move the start y on ios7, possible reasons:
+    // - we are drawing the view ourselves, and we were supposed to use the property ourselves, its not clear from iOS SDK documentation
+    // - the property is not working as expected, an iOS SDK issue
+    float startY = 0;
+
+    // iOS 7 changes handling of status bar, this prevents "views under status bar"
+    if ([[[UIDevice currentDevice] systemVersion] floatValue] >= 7.0) {
+        startY = statusBarHeight;
+    }
+
+    // At this point we may have a transform (only self, subviews are not transformed)...
+    // If we dont set to identity transform, all rotation animations break.
+    CGAffineTransform currentTransform = self.transform;
+    self.transform = CGAffineTransformIdentity;
+
     if (self.mainView == nil) {
         CGRect screenRect =  [[UIScreen mainScreen] bounds];
         // we need to get the screen size with the right orientation which means to get the height and width
         // and then to switch their positions if (we got a landscape orientation)XOR(we need landscape orientation)
         // we do that here with two replace statements
-        
-        // capture height and width
+
         CGFloat height = screenRect.size.height;
         CGFloat width = screenRect.size.width;
-        TPLog(@"height: %f, width: %f", height, width);
+
         // make sure that height<width (portrait mode properties)
         if (width > height) {
             TPLog(@"Switch");
@@ -237,41 +286,61 @@
             width = height;
             height = temp;
         }
-        TPLog(@"height: %f, width: %f, %d", height, width, (int)[[UIApplication sharedApplication] statusBarOrientation]);
-        // change data to landscape if needed
-        if (UIDeviceOrientationIsLandscape([[UIApplication sharedApplication] statusBarOrientation])) {
-            TPLog(@"Landscape");
+
+        // Change data to landscape if needed
+        UIInterfaceOrientation orientation = [[UIApplication sharedApplication] statusBarOrientation];
+        if (UIDeviceOrientationIsLandscape(orientation)) {
             CGFloat temp = width;
             width = height;
             height = temp;
         }
+
         TPLog(@"height: %f, width: %f", height, width);
 
-        [self buildViewWithNavigationBarAndWidth:width height:height];
-        [self addSubview:self.mainView];
-        
+        [self buildViewWithNavigationBarAndWidth:width height:height-statusBarHeight];
+
         if (self.initialUrl) {
             NSURL *url = [NSURL URLWithString:self.initialUrl];
             NSURLRequest* request = [NSURLRequest requestWithURL:url];
             [self.offerwallContainer loadRequest:request];
-            
             self.webViewContainer = self.offerwallContainer;
         }
 
-        // ViewController::edgesForExtendedLayout is not working, so we will need to move the start y on ios7, possible reasons:
-        // - we are drawing the view ourselves, and we were supposed to use the property ourselves, its not clear from iOS SDK documentation
-        // - the property is not working as expected, an iOS SDK issue
-        float startY = 0;
-        
-        // iOS 7 changes handling of status bar, this prevents "views under status bar"
         if ([[[UIDevice currentDevice] systemVersion] floatValue] >= 7.0) {
-            startY = statusBarHeight;
             // TODO: presuming offerwall status bar should always be white...
-            self.backgroundColor = [UIColor whiteColor];
+            self.backgroundColor = [UIColor whiteColor]; // will be reset by popup
         }
 
-        self.mainView.frame = CGRectMake(0, startY, width, height-statusBarHeight);
+        if (self.viewMode == TPViewModePopup) {
+            [self setupAsPopup];
+        }
+
+        [self addSubview:self.mainView];
+
     }
+
+    // Force apply rotation animation by resetting transforms
+    self.transform = prevTransform;
+    self.transform = currentTransform;
+
+    // Adjust bounds when rotated on popup mode - for some reason unlike in fullscreen the view does not get resized
+    CGFloat mainWidth = self.bounds.size.width - horizontalMargin * 2;
+    CGFloat mainHeight = self.bounds.size.height - verticalMargin * 2 - startY;
+    if (self.viewMode == TPViewModePopup) {
+        self.mainView.bounds = CGRectMake(0, 0, mainWidth, mainHeight);
+
+    }
+
+    // on iOS7 the frame needs to be moved as well.
+    if ([[[UIDevice currentDevice] systemVersion] floatValue] >= 7.0) {
+        self.mainView.frame = CGRectMake(horizontalMargin, verticalMargin + startY, mainWidth, mainHeight);
+    }
+    prevTransform = currentTransform;
+
+    TPLog(@"> self.frame      %@", NSStringFromCGRect(self.frame));
+    TPLog(@"> self bounds     %@", NSStringFromCGRect(self.bounds));
+    TPLog(@"> mainView frame  %@", NSStringFromCGRect(self.mainView.frame));
+    TPLog(@"> mainView bounds %@", NSStringFromCGRect(self.mainView.bounds));
 }
 
 #pragma mark - Loading offers
@@ -294,7 +363,7 @@
     self.offerContainer.tag = 0;
     self.offerContainer.userInteractionEnabled = YES;
     self.offerContainer.delegate = self;
-    
+
     [self.offerContainer setAllowsInlineMediaPlayback:YES];
     [self.offerContainer setMediaPlaybackRequiresUserAction:NO];
     [self.offerContainer setScalesPageToFit:YES];
@@ -333,10 +402,13 @@
     [self.offerContainer removeFromSuperview];
     self.offerContainer = nil;
     [self setupNavigationBarUsingBack:NO];
+    [self.webNavigationBar onSDKEvent:@{kTPSDKEventTypeKey: kTPSDKEventTypeContainerStatusChanged,
+                                        kTPSDKEventSourceKey: kTPOfferContainer,
+                                        kTPSDKEventNewStatusKey: kTPSDKEventStatusClosed}];
 }
 
 #pragma mark - Indicator on Navigation Bar
-- (void) showLoadingIndicator {
+- (void)showLoadingIndicator {
     if ([[BaseTrialpayManager sharedInstance] useWebNavigationBar]) {
         [self.webNavigationBar showSpinner];
     } else {
@@ -351,7 +423,7 @@
     }
 }
 
-- (void) hideLoadingIndicator {
+- (void)hideLoadingIndicator {
     if ([[BaseTrialpayManager sharedInstance] useWebNavigationBar]) {
         [self.webNavigationBar hideSpinner];
     } else {
@@ -423,6 +495,13 @@
         }
     }
 
+    // if the special protocol starts with "tpvideo", stop the URL load and open the video within our video trailer flow.
+    if ([request.URL.absoluteString hasPrefix:kTPKeyVideoPrefix]) {
+        NSString *videoResourceURL = [request.URL.absoluteString substringFromIndex:[kTPKeyVideoPrefix length]];
+        [self.delegate playVideoWithURL:videoResourceURL];
+        return NO;
+    }
+
     // if the special protocol starts with "tpbowhttp(s)", remove tpbow prefix. it was needed only in order to skip the offerContainer
     NSURL *url = request.URL;
     if ([request.URL.scheme hasPrefix:@"tpbow"]) {
@@ -439,14 +518,23 @@
     return NO;
 }
 
+
 - (void)webViewDidStartLoad:(UIWebView *)webView {
-    TPLog(@"%@", [self getWebViewName:webView]);
+    TPLog(@"webViewDidStartLoad %@", [self getWebViewName:webView]);
     [self showLoadingIndicator];
+    [self.webNavigationBar onSDKEvent:@{kTPSDKEventTypeKey: kTPSDKEventTypePageStatusChanged,
+                                        kTPSDKEventSourceKey: [self getWebViewName:webView],
+                                        kTPSDKEventNewStatusKey: kTPSDKEventStatusLoadingStarted,
+                                        kTPSDKEventURLKey: webView.request.URL.absoluteString}];
 }
 
 - (void)webViewDidFinishLoad:(UIWebView *)webView {
-    TPLog(@"%@", [self getWebViewName:webView]);
+    TPLog(@"webViewDidFinishLoad %@", [self getWebViewName:webView]);
     [self hideLoadingIndicator];
+    [self.webNavigationBar onSDKEvent:@{kTPSDKEventTypeKey: kTPSDKEventTypePageStatusChanged,
+                                        kTPSDKEventSourceKey: [self getWebViewName:webView],
+                                        kTPSDKEventNewStatusKey: kTPSDKEventStatusLoadingFinished,
+                                        kTPSDKEventURLKey: webView.request.URL.absoluteString}];
 }
 
 - (void)webView:(UIWebView *)webView didFailLoadWithError:(NSError *)error {
@@ -544,7 +632,7 @@
     NSString *url = [[TpUrlManager sharedInstance] offerwallUrlForTouchpoint:touchpointName];
     TPLog(@"Url: %@", url);
     if (url == nil) {
-        TPCustomerLog(@"Unable to get offerwall URL fo {url}", @"Unable to get offerwall URL fo %@", touchpointName);
+        TPCustomerLog(@"Unable to get offerwall URL for {url}", @"Unable to get offerwall URL for %@", touchpointName);
         return false;
     }
     [self unloadOfferContainer];

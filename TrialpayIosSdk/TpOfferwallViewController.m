@@ -8,7 +8,7 @@
 #import "TpOfferwallViewController.h"
 #import "TpUtils.h"
 #import "TpArcSupport.h"
-#import "BaseTrialpayManager.h"
+#import "TpVideo.h"
 
 @interface TpOfferwallViewController ()
 @end
@@ -19,8 +19,9 @@
 #pragma mark - Init with touchpoint name
 - (id)initWithTouchpointName:(NSString *)touchpointName {
     TPLog(@"initWithTouchpointName %@", touchpointName);
-    self = [self init];
-    _touchpointName = touchpointName;
+    if ((self = [self init])) {
+        _touchpointName = touchpointName;
+    }
 
     return self;
 }
@@ -39,7 +40,7 @@
 -(void)loadView {
     TPLogEnter;
     [[UIApplication sharedApplication] setStatusBarHidden:[UIApplication sharedApplication].statusBarHidden withAnimation:UIStatusBarAnimationFade];
-    self.tpWebView = [[[TpWebView alloc] initWithFrame:CGRectMake(0.0, 0.0, 320.0, 460.0)] TP_AUTORELEASE];
+    self.tpWebView = [[[TpWebView alloc] initWithFrame:CGRectZero] TP_AUTORELEASE]; // the frame is recalculated, lets make it clear that this frame doent matter
     self.view = self.tpWebView;
     self.tpWebView.delegate = self;
 }
@@ -48,6 +49,7 @@
     TPLogEnter;
 
     [super viewDidLoad];
+    self.tpWebView.viewMode = self.viewMode;
     [self.tpWebView loadWebViewTouchpoint:self.touchpointName];
 }
 
@@ -57,6 +59,11 @@
     [self dismissViewControllerAnimated:YES completion:nil];
     [self.delegate tpOfferwallViewController:self close:sender forTouchpointName:_touchpointName];
     self.tpWebView.delegate = nil; // release delegate on close
+}
+
+#pragma mark - Opening a video trailer from the offerwall
+- (void)playVideoWithURL:(NSString *)videoResourceURL {
+    [[TpVideo sharedInstance] playVideoWithURL:videoResourceURL fromViewController:self withBlock:nil];
 }
 
 #pragma mark - Autorotate for both ios5 and ios6

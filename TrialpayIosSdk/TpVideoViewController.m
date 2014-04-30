@@ -55,10 +55,21 @@ struct TpVideoBorders {
 };
 
 - (struct TpVideoBorders)getVideoBorders {
+    struct TpVideoBorders borders;
+
     CGSize naturalSize = self.moviePlayer.naturalSize;
-    CGSize viewFrameSize = [self getVideoViewFrameSize];
+    if ((naturalSize.width <= 0) || (naturalSize.height <= 0)) {
+        // The moviePlayer hasn't finished initializing yet. We should have caught this inside countdown, but
+        // we'll do a fallback check here. Returing 0 borders will just mean UI elements will be placed relative
+        // to the screen, not the video.
+        TPLog(@"Invalid naturalSize of moviePlayer. Defaulting to 0 borders.");
+        borders.horizontal = 0.0f;
+        borders.vertical = 0.0f;
+        return borders;
+    }
 
     CGSize displayedVideoSize;
+    CGSize viewFrameSize = [self getVideoViewFrameSize];
     float widthRatio = viewFrameSize.width / naturalSize.width;
     float heightRatio = viewFrameSize.height / naturalSize.height;
     if (widthRatio > heightRatio) {
@@ -66,7 +77,6 @@ struct TpVideoBorders {
     } else {
         displayedVideoSize = CGSizeMake(viewFrameSize.width, naturalSize.height * widthRatio);
     }
-    struct TpVideoBorders borders;
     borders.horizontal = (viewFrameSize.width - displayedVideoSize.width) / 2.0;
     borders.vertical = (viewFrameSize.height - displayedVideoSize.height) / 2.0;
     return borders;
@@ -87,7 +97,7 @@ struct TpVideoBorders {
     struct TpVideoBorders videoBorders = [self getVideoBorders];
     float textHeight = 24.0;
     float textWidth = 16.0;
-    // Place the countdown text in the upper right corner.
+    // Place the close button in the upper right corner.
     CGRect exitButtonLabelRect = CGRectMake(viewFrameSize.width - (videoBorders.horizontal + 3.0 + textWidth), videoBorders.vertical + 1.0, textWidth, textHeight);
     return exitButtonLabelRect;
 }
@@ -137,13 +147,22 @@ struct TpVideoBorders {
 // Runs every second
 - (void)countdown {
     if (_videoTimeRemaining == VIDEO_TIME_REMAINING_UNITIALIZED) {
-        _videoTimeRemaining = (int)self.moviePlayer.duration;
+        // Confirm that the moviePlayer is fully initialized.
+        if ((self.moviePlayer == nil) || (self.moviePlayer.duration <= 0) ||
+            (self.moviePlayer.naturalSize.width <= 0) || (self.moviePlayer.naturalSize.height <= 0)) {
+            // Do nothing for now (we'll check again the next time we run this timer).
+            TPLog(@"moviePlayer is still being initialized - returning from countdown early");
+            return;
+        } else {
+            _videoTimeRemaining = (int)self.moviePlayer.duration;
+        }
     } else {
         _videoTimeRemaining--;
     }
     if (_videoTimeRemaining <= 0) {
         [_countdownTimer invalidate];
     }
+
     // Completion firing. Confirm that we're at least 5 seconds into the video, so that the click API request has time to complete.
     if ((self.moviePlayer.duration - _videoTimeRemaining) >= 5) {
         if (_completionTime >= 0) {
