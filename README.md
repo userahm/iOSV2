@@ -1,7 +1,7 @@
-Trialpay iOS SDK
+TrialPay iOS SDK
 ================
 
-Thanks for choosing Trialpay!
+Thanks for choosing TrialPay!
 
 ### More documentation
 
