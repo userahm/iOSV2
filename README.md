@@ -1,4 +1,4 @@
-TrialPay iOS SDK (v2.2014173)
+TrialPay iOS SDK (v2.2014180)
 ================
 
 Thanks for choosing TrialPay!
@@ -12,7 +12,7 @@ Thanks for choosing TrialPay!
 ### Changelog
 
 
-#### Version 2.2014173
+#### Version 2.2014180
 
 - Square Icons on Mobile Offerwall
 - Popup Mode

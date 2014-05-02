@@ -44,28 +44,28 @@ NSMutableArray* jsCommands;
             // update the navbar readiness status, now it's ready to handle some commands
             TPLog(@"NAVBAR is ready");
             self.isReady = YES;
-            
+
             while ([jsCommands count] > 0) {
                 [self stringByEvaluatingJavaScriptFromString:[jsCommands objectAtIndex:0]];
                 [jsCommands removeObjectAtIndex:0];
             }
-            
+
         } else {
             // execute the command, i.e. "refresh", "back" etc.
 
             // create method call from string, to prevent overwrite unwanted methods, we add a prefix "nav".
-        	// TODO: replace the methodName lookup logic with a dictionary. The methodName should include the nav prefix.
+            // TODO: replace the methodName lookup logic with a dictionary. The methodName should include the nav prefix.
             NSString *methodName = [tpCommand stringByReplacingCharactersInRange:NSMakeRange(0,1) withString:[[tpCommand substringToIndex:1] uppercaseString]];
 
             SEL method = NSSelectorFromString([NSString stringWithFormat:@"nav%@:", methodName]);
 
-        	NSString *urlArgumentString = request.URL.absoluteString;
-        	NSUInteger position = [urlArgumentString rangeOfString:@"/" options:0 range:NSMakeRange(5,urlArgumentString.length-5)].location;
-        	if (position == NSNotFound) {
-        		urlArgumentString = @"";
-	        } else {
-	            urlArgumentString = [urlArgumentString substringFromIndex:position+1];
-    	    }
+            NSString *urlArgumentString = request.URL.absoluteString;
+            NSUInteger position = [urlArgumentString rangeOfString:@"/" options:0 range:NSMakeRange(5,urlArgumentString.length-5)].location;
+            if (position == NSNotFound) {
+                urlArgumentString = @"";
+            } else {
+                urlArgumentString = [urlArgumentString substringFromIndex:position+1];
+            }
 
             if ([self.tpDelegate respondsToSelector:method]) {
                 TPLog(@"NAVBAR call %@", NSStringFromSelector(method));
@@ -75,10 +75,11 @@ NSMutableArray* jsCommands;
                 // We will have to make substitutions on strings when we need parameters (like for setTitle).
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-	            [self.tpDelegate performSelector:method withObject:urlArgumentString];
+                [self.tpDelegate performSelector:method withObject:urlArgumentString];
 #pragma clang diagnostic pop
             }
         }
+        return NO;
     }
 
     return YES;

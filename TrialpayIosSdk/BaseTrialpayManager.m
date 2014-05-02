@@ -262,7 +262,7 @@ NSMutableDictionary *customParams = nil;
 
 #pragma mark - Get SDK Version
 - (NSString*)sdkVersion {
-    return @"ios.2.2014173";
+    return @"ios.2.2014180";
 }
 
 #pragma mark - BaseTrialpayManager getter/setter
