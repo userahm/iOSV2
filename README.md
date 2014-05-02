@@ -12,18 +12,18 @@ Thanks for choosing TrialPay!
 ### Changelog
 
 
-#### Release 74 - 2.2014173
+#### Version 2.2014173
 
 - Square Icons on Mobile Offerwall
 - Popup Mode
 - App Trailers on Offerwall
 - iPad Support for app trailers
 
-#### Release 73 - 2.2014120
+#### Version 2.2014120
 
 No release notes.
 
-#### Release 72 - 2.2014080
+#### Version 2.2014080
 - Mobile GIF
 - Header updates
 - Mobile interstitial
