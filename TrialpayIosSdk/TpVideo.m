@@ -14,12 +14,19 @@
 #import "TpArcSupport.h"
 #import "TpUtils.h"
 
+// times given in seconds. in sdk3 these will be controlled by the config.
+int TP_DOWNLOAD_NEXT_VIDEO_DELAY = 10;
+int TP_DOWNLOAD_CHECK_WAIT_SECONDS = 15;
+NSTimeInterval TP_DOWNLOAD_FLAG_RESET_INTERVAL = 1200.0f; // 20 minutes.
+
 @interface TpVideo ()
-// Forward declare these methods so they're available to TpVideoConnectionDelegate
+// Forward declare these methods so they're available to TpVideoConnectionDelegate and TPVideoDownloadCheckOperation
 - (NSString *)getLocalVideoPathForURL:(NSString *)downloadURL;
 - (id)getMetaDataWithKey:(NSString *)key forURL:(NSString *)downloadURL;
 - (BOOL)setMetaData:(id)data withKey:(NSString *)key forURL:(NSString *)downloadURL;
 - (void)markDownloadCompleteForURL:(NSString *)downloadURL withSuccess:(BOOL)isSuccess withReattempt:(BOOL)isReattempt;
+- (BOOL)videoDownloadCheck;
+- (void)cancelVideoDownloadCheck;
 @end
 
 @interface TpVideoConnectionDelegate : NSObject
@@ -119,10 +126,44 @@
 
 @end
 
+@interface TPVideoDownloadCheckOperation : NSOperation
+@end
+
+@implementation TPVideoDownloadCheckOperation
+- (void) main {
+    @autoreleasepool {
+        while (!self.isCancelled) {
+#if defined(__TRIALPAY_USE_EXCEPTIONS)
+            @try {
+#endif
+                if ([[TpVideo sharedInstance] videoDownloadCheck]) {
+                    TPLog(@"In TPVideoDownloadCheckOperation about to sleep for %d seconds", TP_DOWNLOAD_CHECK_WAIT_SECONDS);
+                    [NSThread sleepForTimeInterval:TP_DOWNLOAD_CHECK_WAIT_SECONDS];
+                } else {
+                    [self cancel];
+                    [[TpVideo sharedInstance] cancelVideoDownloadCheck];
+                }
+#if defined(__TRIALPAY_USE_EXCEPTIONS)
+            }
+            @catch (NSException *exception) {
+                TPLog(@"%@\n%@", exception, [exception callStackSymbols]);
+                // check if operation should be cancelled
+                if ([[[NSThread currentThread].threadDictionary valueForKey:@"cancelOperation"] boolValue]) {
+                    [self cancel];
+                }
+            }
+#endif
+        }
+    }
+}
+@end
+
 @implementation TpVideo {
     NSMutableDictionary *_tpVideoMetaData; // A mapping from remote resource URL (downloadURL) to subdictionaries of video metadata
     NSString *_tpVideoFileDirectory; // The directory in which local video files are stored
     NSOperationQueue *_tpVideoOperationQueue; // Create our own operation queue so we don't have to pass the queue from BaseTrialpayManager
+    NSOperation *_tpVideoDownloadCheckOperation;
+    NSMutableArray *_videosToDownload;
     BOOL _didHideStatusBar;
 
     TpVideoViewController *_videoViewController; // View controller for playing the video.
@@ -134,19 +175,26 @@
     BOOL _isStoreViewOpened;
     BOOL _isWebViewLoaded;
     BOOL _isWebViewOpened;
+    BOOL _isVideoBeingDownloaded;
     BOOL _isVideoBeingShown;
+    NSDate *_isVideoBeingDownloadedResetTime;
 }
 
 #pragma mark - Init, Dealloc, and Singleton
 
 - (id)init {
     if ((self = [super init])) {
+        _isVideoBeingDownloaded = NO;
         _isVideoBeingShown = NO;
         _isStoreViewOpened = NO;
         _isWebViewOpened = NO;
 
+        _videosToDownload = [[NSMutableArray alloc] init];
+
         _tpVideoOperationQueue = [[NSOperationQueue alloc] init];
         _tpVideoOperationQueue.name = @"TP Video Operation Queue";
+
+        _tpVideoDownloadCheckOperation = nil;
 
         // Load the collected metadata
         _tpVideoMetaData = [[[TpDataStore sharedInstance] dataValueForKey:kTPKeyVideoMetaData] TP_RETAIN];
@@ -175,8 +223,10 @@
 }
 
 - (void)dealloc {
+    [_videosToDownload TP_RELEASE];
     [_tpVideoOperationQueue TP_RELEASE];
     [_tpVideoFileDirectory TP_RELEASE];
+    [_tpVideoDownloadCheckOperation TP_RELEASE];
     [_tpVideoMetaData TP_RELEASE];
     _tpVideoMetaData = nil;
     [_videoViewController TP_RELEASE];
@@ -184,6 +234,7 @@
     [_endcapViewController TP_RELEASE];
     [_storeViewController TP_RELEASE];
     [_closeTrailerBlock TP_RELEASE];
+    [_isVideoBeingDownloadedResetTime TP_RELEASE];
     [super TP_DEALLOC];
 }
 
@@ -313,6 +364,67 @@ TpVideo *__tpVideoSingleton;
 
 #pragma mark - Downloading Video
 
+- (void)startVideoDownloadCheck {
+    [self cancelVideoDownloadCheck];
+    _tpVideoDownloadCheckOperation = [[TPVideoDownloadCheckOperation alloc] init];
+    [_tpVideoOperationQueue addOperation:_tpVideoDownloadCheckOperation];
+}
+
+- (void)cancelVideoDownloadCheck {
+    [_tpVideoDownloadCheckOperation cancel];
+    [_tpVideoDownloadCheckOperation TP_RELEASE];
+    _tpVideoDownloadCheckOperation = nil;
+}
+
+// If there are videos left to download and we are not currently in the middle of a download, begin a new download.
+//
+// Return YES if we should call this function again after a delay.
+// Return NO if we have finished downloading video files and we don't need to call this function again.
+- (BOOL)videoDownloadCheck {
+    if ([_videosToDownload count] <= 0) {
+        // There are no more videos to download.
+        return NO;
+    }
+
+    // Check if we've exceeded our timeout for when we reset _isVideoBeingDownloaded. We use this timeout just in case we somehow
+    // fail to turn off the flag, and if we hit this timeout then we should be fine to download another video anyway.
+    if (_isVideoBeingDownloadedResetTime && ([[NSDate date] compare:_isVideoBeingDownloadedResetTime] == NSOrderedDescending)) {
+        TPLog(@"Resetting _isVideoBeingDownloaded after exceeding timeout");
+        _isVideoBeingDownloaded = NO;
+    }
+
+    if (_isVideoBeingDownloaded) {
+        // We only want to download one video at a time. Return early, but indicate that we should keep checking for more videos.
+        return YES;
+    }
+    // We're not currently downloading a video, so grab the first video and begin the download (after a delay).
+    _isVideoBeingDownloaded = YES;
+
+    // Reset the reset time.
+    [_isVideoBeingDownloadedResetTime TP_RELEASE];
+    _isVideoBeingDownloadedResetTime = [[NSDate dateWithTimeIntervalSinceNow:TP_DOWNLOAD_FLAG_RESET_INTERVAL] TP_RETAIN];
+
+    // Use a synchronized lock on _videosToDownload in case new videos are being added.
+    NSString *nextVideoDownloadURL;
+    @synchronized(_videosToDownload) {
+        nextVideoDownloadURL = [_videosToDownload objectAtIndex:0];
+        [nextVideoDownloadURL TP_RETAIN];
+        [_videosToDownload removeObjectAtIndex:0]; // This is the only time we remove objects from _videosToDownload.
+    }
+    TPLog(@"In videoDownloadCheck about to attempt next download in %d seconds", TP_DOWNLOAD_NEXT_VIDEO_DELAY);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(TP_DOWNLOAD_NEXT_VIDEO_DELAY * NSEC_PER_SEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+        [self loadVideo:nextVideoDownloadURL];
+        [nextVideoDownloadURL TP_RELEASE];
+    });
+
+    if ([_videosToDownload count] <= 0) {
+        // There are no more videos to download.
+        return NO;
+    } else {
+        return YES;
+    }
+}
+
 // A simple wrapper to reset hasRetriedRequest
 - (void)loadVideo:(NSString *)downloadURL {
     [self removeMetaDataWithKey:@"hasRetriedRequest" forURL:downloadURL];
@@ -321,24 +433,18 @@ TpVideo *__tpVideoSingleton;
 
 // Download the video file to local storage
 - (void)downloadVideoFromURL:(NSString *)downloadURL {
-
     if ([self getMetaDataWithKey:@"isCompleteVideoStored" forURL:downloadURL]) {
         TPLog(@"Resource %@ is already downloaded to device. Download attempt cancelled.", downloadURL);
-        return;
-    }
-    NSString *localFilePath = [self getLocalVideoPathForURL:downloadURL];
-    if (localFilePath == nil) {
-        TPLog(@"Cannot determine local video file path. Download attempt cancelled.");
+        [self markDownloadCompleteForURL:downloadURL withSuccess:YES withReattempt:NO];
         return;
     }
 
-    // Ensure that we don't create duplicate requests if the developer checks availability very frequently.
-    // This isn't a perfect lock but that's fine in this case.
-    if ([self getMetaDataWithKey:@"isDownloadInProgress" forURL:downloadURL]) {
-        TPLog(@"Resource %@ is currently being downloaded to device. Download attempt cancelled.", downloadURL);
+    NSString *localFilePath = [[TpVideo sharedInstance] getLocalVideoPathForURL:downloadURL];
+    if (localFilePath == nil) {
+        TPLog(@"Cannot determine local video file path. Download attempt cancelled.");
+        [self markDownloadCompleteForURL:downloadURL withSuccess:NO withReattempt:NO];
         return;
     }
-    [self setMetaData:@1 withKey:@"isDownloadInProgress" forURL:downloadURL];
 
     // Assemble the request, adding a Range header if we've already downloaded a portion of the file.
     // Ignore local cache data for this request. We do this for 2 reasons:
@@ -360,23 +466,19 @@ TpVideo *__tpVideoSingleton;
         }
     }
 
-    // Construct the delegate and initiate the asynchronous request
+    // Set the download request to be a low-priority background request.
+    [videoURLRequest setNetworkServiceType:NSURLNetworkServiceTypeBackground];
+
+    // Construct the delegate and initiate the asynchronous request.
+    // Delegate methods will be queued on the video operation queue.
     TpVideoConnectionDelegate *videoConnectionDelegate = [[[TpVideoConnectionDelegate alloc] init] TP_AUTORELEASE];
-    [NSURLConnection connectionWithRequest:videoURLRequest delegate:videoConnectionDelegate];
+    NSURLConnection *connection = [[NSURLConnection alloc] initWithRequest:videoURLRequest delegate:videoConnectionDelegate startImmediately:NO];
+    [connection setDelegateQueue:_tpVideoOperationQueue];
+    [connection start];
 }
 
-- (void)reattemptDownload:(NSString *)downloadURL {
-    if ([self getMetaDataWithKey:@"hasRetriedRequest" forURL:downloadURL]) return;
-
-    // Reattempt the download. Confirm that we've set the flag before reattempting, or we could retry forever.
-    if ([self setMetaData:@1 withKey:@"hasRetriedRequest" forURL:downloadURL]) {
-        TPLog(@"Download will be reattempted in 15 seconds.");
-        [self performSelector:@selector(downloadVideoFromURL:) withObject:downloadURL afterDelay:15];
-    }
-}
-
+// Final bookkeeping for a raw video file download request. This function can be called more than once on a request, but it MUST be called at least once.
 - (void)markDownloadCompleteForURL:(NSString *)downloadURL withSuccess:(BOOL)isSuccess withReattempt:(BOOL)isReattempt {
-    [self removeMetaDataWithKey:@"isDownloadInProgress" forURL:downloadURL];
     if (isSuccess) {
         [self setMetaData:@1 withKey:@"isCompleteVideoStored" forURL:downloadURL];
     } else {
@@ -384,8 +486,16 @@ TpVideo *__tpVideoSingleton;
         // when the download is finished). We've determined there's a problem with the download so we want to remove that flag.
         [self removeMetaDataWithKey:@"isCompleteVideoStored" forURL:downloadURL];
     }
-    if (isReattempt) {
-        [self reattemptDownload:downloadURL];
+
+    if (isReattempt && ![self getMetaDataWithKey:@"hasRetriedRequest" forURL:downloadURL] && [self setMetaData:@1 withKey:@"hasRetriedRequest" forURL:downloadURL]) {
+        // We would like to reattempt, we haven't already reattempted, and we've successfully set the reattempt flag. So, reattempt.
+        TPLog(@"Download of %@ will be reattempted in %d seconds.", downloadURL, TP_DOWNLOAD_NEXT_VIDEO_DELAY);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(TP_DOWNLOAD_NEXT_VIDEO_DELAY * NSEC_PER_SEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+            [self downloadVideoFromURL:downloadURL];
+        });
+    } else {
+        // We are no longer in the process of downloading a video.
+        _isVideoBeingDownloaded = NO;
     }
 }
 
@@ -584,12 +694,21 @@ TpVideo *__tpVideoSingleton;
 
     // Clear the hasFiredCompletion flag
     [self removeMetaDataWithKey:@"hasFiredCompletion" forURL:downloadURL];
-    // Download the video to local storage. The request must be made from the main thread.
-    [self performSelectorOnMainThread:@selector(loadVideo:) withObject:downloadURL waitUntilDone:NO];
+
+    // Add the video to the list of videos to download. We'll add the URL to the end of the array and process in FIFO order.
+    @synchronized(_videosToDownload) {
+        [_videosToDownload addObject:downloadURL];
+    }
+
+    // Begin the video download check if it has not already started.
+    if (_tpVideoDownloadCheckOperation == nil) {
+        [self startVideoDownloadCheck];
+    }
 }
 
 - (BOOL)isResourceReady:(NSString *)downloadURL {
     [self pruneVideoStorage];
+
     // If we've already fired a completion then we need to check the availability API before allowing the
     // video to be shown again. We'll clear the hasFiredCompletion flag when we recheck availability.
     if ([self getMetaDataWithKey:@"isCompleteVideoStored" forURL:downloadURL] && ![self getMetaDataWithKey:@"hasFiredCompletion" forURL:downloadURL]) {
@@ -602,18 +721,9 @@ TpVideo *__tpVideoSingleton;
 // The flow will be presented modally from baseViewController.
 // completionBlock will be executed when we close the video trailer flow (i.e. from inside closeTrailer). This can be nil.
 - (void)playVideoWithURL:(NSString *)downloadURL fromViewController:(UIViewController *)baseViewController withBlock:(void (^)(void))completionBlock {
-    // Gather necessary information.
-    if (![self getMetaDataWithKey:@"isCompleteVideoStored" forURL:downloadURL]) {
-        TPLog(@"Video resource %@ is not stored locally. Aborting video playback.", downloadURL);
-        return;
-    }
-    NSString *filePath = [self getLocalVideoPathForURL:downloadURL];
-    if (filePath == nil) {
-        TPLog(@"Cannot determine local video file path for resource %@. Aborting video playback.", downloadURL);
-        return;
-    }
     // Check if we already have the video up, this prevents a "double-click" making 2 video objects to run, resulting in frozen UI. (iOS6/iphone4)
     if (_isVideoBeingShown) {
+        // Don't fire the completion block because the user is already viewing a valid trailer flow, which will fire its own completion block.
         return;
     }
     _isVideoBeingShown = YES;
@@ -622,6 +732,21 @@ TpVideo *__tpVideoSingleton;
     [_closeTrailerBlock TP_RELEASE]; // Release the existing block, if present.
     _closeTrailerBlock = completionBlock;
     [_closeTrailerBlock TP_RETAIN];
+
+    // Gather necessary information.
+    if (![self getMetaDataWithKey:@"isCompleteVideoStored" forURL:downloadURL]) {
+        TPLog(@"Video resource %@ is not stored locally. Aborting video playback.", downloadURL);
+        [self fireCloseTrailerBlock];
+        _isVideoBeingShown = NO;
+        return;
+    }
+    NSString *filePath = [self getLocalVideoPathForURL:downloadURL];
+    if (filePath == nil) {
+        TPLog(@"Cannot determine local video file path for resource %@. Aborting video playback.", downloadURL);
+        [self fireCloseTrailerBlock];
+        _isVideoBeingShown = NO;
+        return;
+    }
 
     // Load the interstitial endcap and app store view controllers in the background.
     [self createEndcap:downloadURL];
@@ -661,11 +786,15 @@ TpVideo *__tpVideoSingleton;
         _isStoreViewOpened = NO;
         _isVideoBeingShown = NO;
 
-        // Fire the closeTrailerBlock, if present
-        if (_closeTrailerBlock != nil) {
-            _closeTrailerBlock();
-        }
+        [[TpVideo sharedInstance] fireCloseTrailerBlock];
     }];
+}
+
+- (void)fireCloseTrailerBlock {
+    // Fire the closeTrailerBlock, if present
+    if (_closeTrailerBlock != nil) {
+        _closeTrailerBlock();
+    }
 }
 
 #pragma mark - Interstitial Webview Endcap

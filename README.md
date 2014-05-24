@@ -1,4 +1,4 @@
-TrialPay iOS SDK (v2.2014180)
+TrialPay iOS SDK (v2.2014212)
 ================
 
 Thanks for choosing TrialPay!
@@ -11,6 +11,10 @@ Thanks for choosing TrialPay!
 
 ### Changelog
 
+
+#### Version 2.2014212
+
+- Download files for video trailers on background, improving user experience
 
 #### Version 2.2014180
 
