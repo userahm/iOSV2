@@ -135,6 +135,9 @@ BaseTrialpayManager *__baseTrialpayManager;
 }
 
 NSMutableDictionary *customParams = nil;
+// store the availability operations so that they can be cancelled and cleared before restarting them
+NSMutableDictionary *__interstitialAvailabilityChecks = nil;
+NSMutableDictionary *_interstitialAvailabilityErrorWaitTimes = nil;
 
 - (void)dealloc {
     [_tpOperationQueue TP_RELEASE];
@@ -259,10 +262,9 @@ NSMutableDictionary *customParams = nil;
     [[TpDataStore sharedInstance] setDataWithValue:visitLengths forKey:kTPKeyVisitLengths];
 }
 
-
 #pragma mark - Get SDK Version
 - (NSString*)sdkVersion {
-    return @"ios.2.2014212";
+    return @"ios.2.2014230";
 }
 
 #pragma mark - BaseTrialpayManager getter/setter
@@ -275,14 +277,11 @@ NSMutableDictionary *customParams = nil;
 - (NSString *)sid {
     NSString *sid = [[TpDataStore sharedInstance] dataValueForKey:kTPSid];
     if (nil == sid) {
-        sid = [TpUtils idfa];
+        sid = [TpUtils macAddress];
         if ([@"" isEqual:sid]) {
-            sid = [TpUtils macAddress];
-            if ([@"" isEqual:sid]) {
-                // since we're using local storage, using the current timestamp and a random number should be fine
-                double time = [[NSDate date] timeIntervalSince1970];
-                sid = [NSString stringWithFormat:@"%f%d", time, arc4random()];
-            }
+            // since we're using local storage, using the current timestamp and a random number should be fine
+            double time = [[NSDate date] timeIntervalSince1970];
+            sid = [NSString stringWithFormat:@"%f%d", time, arc4random()];
         }
         sid = [TpUtils sha1:sid];
         [self setSid:sid];
@@ -564,18 +563,32 @@ NSMutableDictionary *customParams = nil;
 
     UIViewController *rootViewController = [UIApplication sharedApplication].keyWindow.rootViewController;
 
+    // dispatch_async performs a copy on the block, on our behalf, so we don't need to copy it ourselves.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (self.delegate) {
+            TPLog(@"Dispatching offerwallDidOpen to %@", self.delegate);
+            // methods are now optional, so we have to check for existence
+            if ([(NSObject*)self.delegate respondsToSelector:@selector(trialpayManager:withAction:)]) {
+                TPLog(@"Dispatching withAction");
+                [self.delegate trialpayManager:(TrialpayManager *)self withAction:TPOfferwallOpenAction];
+            }
+            if ([(NSObject*)self.delegate respondsToSelector:@selector(trialpayManager:offerwallDidOpenForTouchpoint:)]) {
+                TPLog(@"Dispatching offerwallDidOpenForTouchpoint");
+                [self.delegate trialpayManager:(TrialpayManager *)self offerwallDidOpenForTouchpoint:touchpointName];
+            }
+        }
+    });
+
     // Check for the video trailer interstitial flow, which does not use the normal webview.
     NSString *integrationType = [self getIntegrationTypeForTouchpoint:touchpointName];
     if ([integrationType isEqualToString:@"interstitial"]) {
         NSString *dealspotURL = [self urlForDealspotTouchpoint:touchpointName];
         if ([dealspotURL hasPrefix:kTPKeyVideoPrefix]) {
             NSString *videoResourceURL = [dealspotURL substringFromIndex:[kTPKeyVideoPrefix length]];
-            [[TpVideo sharedInstance] playVideoWithURL:videoResourceURL fromViewController:rootViewController withBlock:^{
-                // We're showing the video trailer directly, outside of TpOfferwallViewController, so we'll need to
-                // set _isShowingOfferwall to NO once we exit the video trailer flow.
-                [BaseTrialpayManager sharedInstance].isShowingOfferwall = NO;
-                TPLog(@"isShowingOfferwall NO");
-            }];
+            void (^completionBlock)(void) = ^{
+                [[BaseTrialpayManager sharedInstance] closeTouchpoint:touchpointName];
+            };
+            [[TpVideo sharedInstance] playVideoWithURL:videoResourceURL fromViewController:rootViewController withBlock:[[completionBlock copy] TP_AUTORELEASE]];
             return;
         }
     }
@@ -595,20 +608,6 @@ NSMutableDictionary *customParams = nil;
 
     [tpOfferwall TP_RELEASE];
 
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (self.delegate) {
-            TPLog(@"Dispatching offerwallDidOpen to %@", self.delegate);
-            // methods are now optional, so we have to check for existence
-            if ([(NSObject*)self.delegate respondsToSelector:@selector(trialpayManager:withAction:)]) {
-                TPLog(@"Dispatching withAction");
-                [self.delegate trialpayManager:(TrialpayManager *)self withAction:TPOfferwallOpenAction];
-            }
-            if ([(NSObject*)self.delegate respondsToSelector:@selector(trialpayManager:offerwallDidOpenForTouchpoint:)]) {
-                TPLog(@"Dispatching offerwallDidOpenForTouchpoint");
-                [self.delegate trialpayManager:(TrialpayManager *)self offerwallDidOpenForTouchpoint:touchpointName];
-            }
-        }
-    });
 }
 
 #pragma mark - Balance
@@ -664,6 +663,7 @@ int __balanceApiErrorWait = 10;
                 Boolean ackSuccess = [tpBalanceObject acknowledgeBalanceInfo: latestBalanceInfo];
                 if (ackSuccess) {
                     [self addDifferentialBalance:differentialBalance toVic:vic];
+                    // dispatch_async performs a copy on the block, on our behalf, so we don't need to copy it ourselves.
                     dispatch_async(dispatch_get_main_queue(), ^{
                         if (self.delegate) {
                             TPLog(@"Dispatching balanceUpdate");
@@ -742,6 +742,8 @@ static NSOperation *__balanceQueryAndWithdrawOperation;
     // if the value is nil, store an empty string
     if (paramValue == nil) {
         paramValue = @"";
+        TPCustomerWarning(@"Nil value provided while setting a custom parameter, storing an empty string instead",
+                          @"Nil value provided while setting a custom parameter, storing an empty string instead");
     }
     // store value for given name
     [customParams setValue:paramValue forKey:paramName];
@@ -803,10 +805,10 @@ static NSOperation *__balanceQueryAndWithdrawOperation;
 }
 
 // Conform to TpOfferwallViewControllerDelegate protocol
-- (void)tpOfferwallViewController:(TpOfferwallViewController *)tpOfferwallViewController close:(id)sender forTouchpointName:(NSString *)touchpointName {
+- (void)closeTouchpoint:(NSString *)touchpointName {
     TPLogEnter;
-    // wait for the navigation animation ~ 300ms,
-    dispatch_after(TP_DISPATCH_TIME(0.4), dispatch_get_main_queue(), ^(void){
+    // dispatch_async performs a copy on the block, on our behalf, so we don't need to copy it ourselves.
+    dispatch_async(dispatch_get_main_queue(), ^(void){
         TPLogEnter;
         _isShowingOfferwall = NO;
 
@@ -837,8 +839,6 @@ static NSOperation *__balanceQueryAndWithdrawOperation;
 
 #pragma mark - Interstitial Availability
 
-// store the availability operations so that they can be cancelled and cleared before restarting them
-NSMutableDictionary *__interstitialAvailabilityChecks = nil;
 
 - (void)startAvailabilityCheckForTouchpoint:(NSString *)touchpointName {
     TPLog(@"startAvailabilityCheckForTouchpoint:%@", touchpointName);
@@ -859,7 +859,6 @@ NSMutableDictionary *__interstitialAvailabilityChecks = nil;
     [__interstitialAvailabilityChecks removeObjectForKey:touchpointName];
 }
 
-NSMutableDictionary *_interstitialAvailabilityErrorWaitTimes = nil;
 
 // Hit the geo availability API for information on whether the touchpoint is available, or to poll for
 // video trailers to preload. (Behavior depends on the integration type.)
@@ -956,12 +955,8 @@ NSMutableDictionary *_interstitialAvailabilityErrorWaitTimes = nil;
         if (videoTrailers != nil) {
             // Store video offer attributes and begin downloading the videos to local storage.
             // The videoTrailers array can be empty, which is a valid response.
-            if ([[[UIDevice currentDevice] systemVersion] floatValue] >= 7.0) {
-                // Right now there's a strange crash that can happen when loading video trailers from the OW in iOS 6.
-                // Until we track down and fix the cause, don't load video trailers in non-interstitial touchpoints.
-                for (NSDictionary *videoTrailerData in videoTrailers) {
-                    [[TpVideo sharedInstance] initializeVideoWithParams:videoTrailerData];
-                }
+            for (NSDictionary *videoTrailerData in videoTrailers) {
+                [[TpVideo sharedInstance] initializeVideoWithParams:videoTrailerData];
             }
         } else {
             TPLog(@"video_trailers was not set on response to non-interstitial touchpoint %@. This should never happen.", touchpointName);

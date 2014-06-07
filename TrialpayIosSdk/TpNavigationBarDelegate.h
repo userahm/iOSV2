@@ -15,4 +15,5 @@
 - (void)navOfferwall:(NSString *)urlString;
 - (void)navOffer:(NSString *)urlString;
 - (void)navChangeHeaderHeight:(NSString *)heightString;
+- (void)navLoaded:(NSString*)dummy; // called on webview delegate finish
 @end

@@ -27,6 +27,15 @@ BOOL __trialpayVerbose=YES;
     return [NSString stringWithFormat:@"%@", version];
 }
 
++ (BOOL)idfa_enabled {
+#if __IPHONE_OS_VERSION_MAX_ALLOWED > __IPHONE_5_1
+    if (NSClassFromString(@"ASIdentifierManager")) {
+        return [ASIdentifierManager sharedManager].advertisingTrackingEnabled;
+    }
+#endif
+    return NO;
+}
+
 + (NSString*)idfa {
 #if __IPHONE_OS_VERSION_MAX_ALLOWED > __IPHONE_5_1
     if (NSClassFromString(@"ASIdentifierManager")) {
@@ -96,8 +105,8 @@ BOOL __trialpayVerbose=YES;
                                   macAddress[3], macAddress[4], macAddress[5]];
     
     if (macAddress[0] == 2 && macAddress[1] == macAddress[2] == macAddress[3] == macAddress[4] == macAddress[5] == 0) {
-        // iOS7 result in 02000000000000, so lets return nil
-        return nil;
+        // iOS7 result in 02000000000000, so lets return an empty string
+        return @"";
     }
     
     // Release the buffer memory

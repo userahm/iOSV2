@@ -28,7 +28,10 @@
 
 @end
 
-@implementation TpWebView
+@implementation TpWebView {
+    CGFloat popupHorizontalMargin;
+    CGFloat popupVerticalMargin;
+}
 
 /*
  * Loads the offerwall using the given frame size.
@@ -41,6 +44,23 @@
         self.autoresizesSubviews = YES;
         self.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         self.initialUrl = nil;
+
+        popupHorizontalMargin = kTpPopupHorizontalMargin;
+        popupVerticalMargin   = kTpPopupVerticalMargin;
+
+        CGRect screenRect =  [[UIScreen mainScreen] bounds];
+        CGFloat width = screenRect.size.width - (2 * kTpPopupHorizontalMargin);
+        CGFloat height = screenRect.size.height - (2 * kTpPopupVerticalMargin);
+        CGFloat maxWidth = (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad)? kTpPopupMaxIPadWidth: kTpPopupMaxIPhoneWidth;
+        CGFloat maxHeight = (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad)? kTpPopupMaxIPadHeight: kTpPopupMaxIPhoneHeight;
+
+        if (width > maxWidth) {
+            popupHorizontalMargin = ABS(width- maxWidth)/2;
+        }
+        if (height > maxHeight) {
+            popupVerticalMargin   = ABS(height- maxHeight)/2;
+        }
+
     }
     return self;
 }
@@ -92,11 +112,11 @@
     self.webNavigationBar.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     self.webNavigationBar.clearsContextBeforeDrawing = NO;
     self.webNavigationBar.contentMode = UIViewContentModeScaleToFill;
-    self.webNavigationBar.hidden = NO;
     self.webNavigationBar.multipleTouchEnabled = NO;
     self.webNavigationBar.userInteractionEnabled = YES;
 
     self.webNavigationBar.tpDelegate = self;
+    self.webNavigationBar.hidden = YES;
     return self.webNavigationBar;
 }
 
@@ -191,11 +211,9 @@
     self.mainView.tag = 0;
     self.mainView.userInteractionEnabled = YES;
 
-    if ([[BaseTrialpayManager sharedInstance] useWebNavigationBar]) {
-        [self.mainView addSubview:[self buildWebNavigationBarWithWidth:width height:navBarHeight]];
-    } else {
-        [self.mainView addSubview:[self buildNavigationBarWithWidth:width height:navBarHeight]];
-    }
+    [self.mainView addSubview:[self buildWebNavigationBarWithWidth:width height:navBarHeight]];
+    [self.mainView addSubview:[self buildNavigationBarWithWidth:width height:navBarHeight]];
+
     [self setupNavigationBarUsingBack:NO];
     [self.mainView addSubview:self.offerwallContainer];
     
@@ -219,9 +237,9 @@
     self.mainView.layer.shadowColor = [[UIColor blackColor] CGColor];
     self.mainView.layer.shadowOffset = CGSizeMake(6, 6);
     self.mainView.layer.shadowOpacity = 0.7;
-    self.mainView.layer.cornerRadius = ([UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPad ? kTpPopupDefaultIPadCornerRadius : kTpPopupDefaultIPhoneCornerRadius);
-//    self.mainView.layer.masksToBounds = YES;
     self.mainView.autoresizesSubviews = YES;
+
+    // Removed corners due to issue #19051, flickers when keyboard is over
 
     // setup as clickable background view
     self.autoresizingMask = (UIViewAutoresizingFlexibleHeight | UIViewAutoresizingFlexibleWidth);
@@ -251,8 +269,8 @@
     CGFloat horizontalMargin = 0;
     CGFloat verticalMargin = 0;
     if (self.viewMode == TPViewModePopup) {
-        horizontalMargin = kTpPopupHorizontalMargin;
-        verticalMargin = kTpPopupVerticalMargin;
+        horizontalMargin = popupHorizontalMargin;
+        verticalMargin = popupVerticalMargin;
     }
 
     // ViewController::edgesForExtendedLayout is not working, so we will need to move the start y on ios7, possible reasons:
@@ -270,6 +288,14 @@
     CGAffineTransform currentTransform = self.transform;
     self.transform = CGAffineTransformIdentity;
 
+    // Change data to landscape if needed
+    UIInterfaceOrientation orientation = [[UIApplication sharedApplication] statusBarOrientation];
+    if (UIDeviceOrientationIsLandscape(orientation)) {
+        CGFloat temp = horizontalMargin;
+        horizontalMargin = verticalMargin;
+        verticalMargin = temp;
+    }
+
     if (self.mainView == nil) {
         CGRect screenRect =  [[UIScreen mainScreen] bounds];
         // we need to get the screen size with the right orientation which means to get the height and width
@@ -279,17 +305,8 @@
         CGFloat height = screenRect.size.height;
         CGFloat width = screenRect.size.width;
 
-        // make sure that height<width (portrait mode properties)
-        if (width > height) {
-            TPLog(@"Switch");
-            CGFloat temp = width;
-            width = height;
-            height = temp;
-        }
-
-        // Change data to landscape if needed
-        UIInterfaceOrientation orientation = [[UIApplication sharedApplication] statusBarOrientation];
         if (UIDeviceOrientationIsLandscape(orientation)) {
+            TPLog(@"Switch");
             CGFloat temp = width;
             width = height;
             height = temp;
@@ -370,29 +387,24 @@
     
     [self.offerContainer loadRequest:request];
     
+    void (^animationBlock)(void) = ^{
+        [self.mainView addSubview:self.offerContainer];
+    };
     [UIView transitionWithView:self.mainView
                       duration:0.5
-                       options:UIViewAnimationOptionTransitionCrossDissolve
-                    animations:^ { [self.mainView addSubview:self.offerContainer]; }
-                    completion:nil];
+                      options:UIViewAnimationOptionTransitionCrossDissolve
+                      animations:[[animationBlock copy] TP_AUTORELEASE]
+                      completion:nil];
     
     self.webViewContainer = self.offerContainer;
     [self setupNavigationBarUsingBack:YES];
 }
 
 - (void)setupNavigationBarUsingBack:(BOOL)useBack {
-    if (![[BaseTrialpayManager sharedInstance] useWebNavigationBar]) {
-        if (useBack) {
-            self.navigationBar.items = [NSArray arrayWithObjects:self.backButton, self.flexibleSpaceArea, self.doneButton, nil];
-        } else {
-            self.navigationBar.items = [NSArray arrayWithObjects:self.flexibleSpaceArea, self.doneButton, nil];
-        }
+    if (useBack) {
+        self.navigationBar.items = [NSArray arrayWithObjects:self.backButton, self.flexibleSpaceArea, self.doneButton, nil];
     } else {
-        if (useBack) {
-            //[self.webNavigationBar enableBackButton];
-        } else {
-            //[self.webNavigationBar disableBackButton];
-        }
+        self.navigationBar.items = [NSArray arrayWithObjects:self.flexibleSpaceArea, self.doneButton, nil];
     }
 }
 
@@ -525,7 +537,7 @@
     [self.webNavigationBar onSDKEvent:@{kTPSDKEventTypeKey: kTPSDKEventTypePageStatusChanged,
                                         kTPSDKEventSourceKey: [self getWebViewName:webView],
                                         kTPSDKEventNewStatusKey: kTPSDKEventStatusLoadingStarted,
-                                        kTPSDKEventURLKey: webView.request.URL.absoluteString}];
+                                        kTPSDKEventURLKey: self.currentRequest.URL.absoluteString}];
 }
 
 - (void)webViewDidFinishLoad:(UIWebView *)webView {
@@ -716,6 +728,12 @@
     self.webViewContainer.frame = webFrame;
     TPLog(@"web container frame %@", NSStringFromCGRect(self.webViewContainer.frame));
     
+}
+
+- (void)navLoaded:(NSString *)dummy {
+    TPLogEnter;
+    self.navigationBar.hidden = YES;
+    self.webNavigationBar.hidden = NO;
 }
 
 // stop webviews clearing its delegates first

@@ -56,9 +56,11 @@
 #pragma mark - Done button pushed - for done button selector
 - (void)tpWebView:(TpWebView *)tpWebView donePushed:(id)sender {
     TPLogEnter;
-    [self dismissViewControllerAnimated:YES completion:nil];
-    [self.delegate tpOfferwallViewController:self close:sender forTouchpointName:_touchpointName];
-    self.tpWebView.delegate = nil; // release delegate on close
+    void (^completionBlock)(void) = ^{
+        [self.delegate closeTouchpoint:_touchpointName];
+        self.tpWebView.delegate = nil; // release delegate on close
+    };
+    [self dismissViewControllerAnimated:YES completion:[[completionBlock copy] TP_AUTORELEASE]];
 }
 
 #pragma mark - Opening a video trailer from the offerwall

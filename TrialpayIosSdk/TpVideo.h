@@ -21,12 +21,13 @@
 - (void)fireImpressionForURL:(NSString *)downloadURL;
 - (void)fireClickForURL:(NSString *)downloadURL;
 - (void)fireCompletionIfNotFiredForURL:(NSString *)downloadURL;
+- (void)firePingsForDownloadNowButtonClickForVideo:(NSString *)downloadURL;
 
 - (void)hideStatusBar;
 
 - (void)playVideoWithURL:(NSString *)downloadURL fromViewController:(UIViewController *)baseViewController withBlock:(void (^)(void))completionBlock;
 - (void)openEndcap:(NSString *)downloadURL;
-- (void)openAppStore;
-- (void)closeTrailer;
+- (void)openAppStoreFrom:(NSString *)viewControllerDescriptor;
+- (void)closeTrailerFlow;
 
 @end

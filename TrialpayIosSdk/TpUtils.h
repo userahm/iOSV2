@@ -31,9 +31,9 @@ typedef enum {
 
 // Controls offerwall view presentation (fullscreen/popup)
 typedef enum {
-    TPViewModeUnknown,
-    TPViewModeFullscreen,
-    TPViewModePopup,
+    TPViewModeUnknown = 0,
+    TPViewModeFullscreen = 1,
+    TPViewModePopup = 2,
 } TPViewMode;
 
 // Create TPLog - a debug call available on debug mode only
@@ -74,6 +74,7 @@ NSLog(@"[TPLOG] [%50.50s] %@", \
 + (void)verboseLogging:(BOOL)verbose;
 
 + (NSString *)appVersion;
++ (BOOL)idfa_enabled;
 + (NSString *)idfa;
 + (NSString *)macAddress;
 + (NSString *)sha1:(NSString*)input;

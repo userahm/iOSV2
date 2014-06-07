@@ -86,6 +86,7 @@ NSMutableArray* jsCommands;
 }
 
 - (void)webViewDidFinishLoad:(UIWebView *)webView {
+    [self.tpDelegate navLoaded:@""];
 }
 
 - (void)executeCommand:(NSString *)jsCommand {

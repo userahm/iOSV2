@@ -10,7 +10,7 @@
 @class TpOfferwallViewController;
 
 @protocol TpOfferwallViewControllerDelegate
-- (void)tpOfferwallViewController:(TpOfferwallViewController *)tpOfferwallViewController close:(id)sender forTouchpointName:(NSString *)touchpointName;
+- (void)closeTouchpoint:(NSString *)touchpointName;
 @end
 
 #import "TpWebView.h"

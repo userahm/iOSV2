@@ -5,6 +5,7 @@
 //  Copyright (c) 2014 TrialPay, Inc. All Rights Reserved.
 //
 
+#import <QuartzCore/QuartzCore.h>
 #import "TpVideoViewController.h"
 #import "BaseTrialpayManager.h"
 #import "TpVideo.h"
@@ -16,8 +17,8 @@
     NSTimer *_countdownTimer;
     int _videoTimeRemaining;
     int _completionTime;;
-    BOOL _didHideStatusBar;
     UIColor *_textColor;
+    NSString *_nextStep;
     // The following properties control the exit button
     UIButton *_exitButton;
     UILabel *_exitButtonLabel;
@@ -27,11 +28,17 @@
     UILabel *_countdownLabel;
     BOOL _isShowCountdown;
     NSString *_countdownText;
+    // The following properties control the download now button
+    UIButton *_downloadNowButton;
+    NSString *_downloadNowText;
+    UIColor *_downloadNowTextColor;
+    UIColor *_downloadNowBackgroundColor;
+    UIColor *_downloadNowBorderColor;
 }
 
 int VIDEO_TIME_REMAINING_UNITIALIZED = -10;
 
-#pragma mark - Countdown Label & Exit Button
+#pragma mark - Countdown Label, Exit Button, and Download Now Button
 
 - (NSString *)generateCountdownText {
     // Check to see if we have the %time% placeholder
@@ -87,6 +94,12 @@ struct TpVideoBorders {
     struct TpVideoBorders videoBorders = [self getVideoBorders];
     float textHeight = 18.0; // this does not correspond to font point
     float textWidth = viewFrameSize.width - (videoBorders.horizontal * 2.0); // set textWidth equal to the width of the displayed video, to accommodate long text.
+    if (_downloadNowButton != nil) {
+        // Shorten the text width by the width of the download now button. The download button appears in the lower right, the countdown
+        // text appears in the lower left, and we don't want them to overlap.
+        // Also subtract the width take by the button shadow, which is not accounted for in the button width.
+        textWidth -= (_downloadNowButton.frame.size.width + kTpDownloadNowButtonShadowRadius * 2);
+    }
     // Place the countdown text in the lower left corner.
     CGRect countdownLabelRect = CGRectMake(videoBorders.horizontal + 2.0, viewFrameSize.height - (videoBorders.vertical + textHeight), textWidth, textHeight);
     return countdownLabelRect;
@@ -111,6 +124,81 @@ struct TpVideoBorders {
     return exitButtonRect;
 }
 
+- (CGRect)getDownloadNowButtonRectForFont:(UIFont *)font {
+    CGSize viewFrameSize = [self getVideoViewFrameSize];
+    struct TpVideoBorders videoBorders = [self getVideoBorders];
+
+    // Get the basic size of the text.
+    CGSize textSize;
+    if ([_downloadNowText respondsToSelector:@selector(sizeWithAttributes:)]) { // Only available in iOS 7.0 and up.
+        textSize = [_downloadNowText sizeWithAttributes:@{ NSFontAttributeName : font }];
+    } else {
+        textSize = [_downloadNowText sizeWithFont:font]; // Deprecated as of iOS 7.0.
+    }
+
+    // Get the size of the button interior by adding padding to the text.
+    // Note that the shadow extends beyond the button dimensions.
+    float horizontalPadding = 10.0f;
+    float verticalPadding = 6.0f;
+    float buttonWidth = textSize.width + horizontalPadding;
+    float buttonHeight = textSize.height + verticalPadding;
+
+    // Calculate the rectangle. The button will be located in the lower right of the video.
+    CGRect buttonRect = CGRectMake(viewFrameSize.width - (videoBorders.horizontal + buttonWidth + kTpDownloadNowButtonShadowRadius),
+                                   viewFrameSize.height - (videoBorders.vertical + buttonHeight + kTpDownloadNowButtonShadowRadius),
+                                   buttonWidth,
+                                   buttonHeight);
+    return buttonRect;
+}
+
+// This is called from TpVideo once we have the endcap click id (which we need to pass to the tracking partner to track installation).
+- (void)showDownloadNowButton {
+    if (_downloadNowButton != nil) {
+        // It should never happen that we call this twice, but check for it since this function is called from outside the class.
+        return;
+    }
+    // Set configuration values that will be used in several places.
+    float buttonOpacity = 0.8f;
+    float fontSize = ([UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPad ? 20.0f : 10.0f); // Use a larger font on iPad.
+    UIFont *titleFont = [UIFont fontWithName:@"Arial" size:fontSize];
+
+    // Configure button basics.
+    _downloadNowButton = [[UIButton buttonWithType:UIButtonTypeCustom] TP_RETAIN];
+    _downloadNowButton.frame = [self getDownloadNowButtonRectForFont:titleFont];
+    _downloadNowButton.layer.opacity = buttonOpacity;
+    [_downloadNowButton setBackgroundColor:_downloadNowBackgroundColor];
+
+    // Configure the button text.
+    [_downloadNowButton setTitle:_downloadNowText forState:UIControlStateNormal];
+    [_downloadNowButton setTitleColor:_downloadNowTextColor forState:UIControlStateNormal];
+    _downloadNowButton.titleLabel.font = titleFont;
+    _downloadNowButton.contentEdgeInsets = UIEdgeInsetsMake(2.0f, 0.0f, 0.0f, 0.0f); // Button text is more centered if we move it down a little.
+
+    // Configure the button outline.
+    _downloadNowButton.layer.borderWidth = 1.0f;
+    _downloadNowButton.layer.borderColor = _downloadNowBorderColor.CGColor;
+
+    // Configure the button shadow.
+    _downloadNowButton.layer.masksToBounds = NO; // Necessary so that the shadow doesn't get cut off.
+    _downloadNowButton.layer.shadowColor = _downloadNowBorderColor.CGColor;
+    _downloadNowButton.layer.shadowRadius = kTpDownloadNowButtonShadowRadius;
+    _downloadNowButton.layer.shadowOpacity = buttonOpacity;
+    _downloadNowButton.layer.shadowOffset = CGSizeMake(0.0f, 0.0f); // We want the shadow to be centered on the button.
+    // We explicity set the path for the shadow. This is the default path, but setting it explicitly helps rendering performance.
+    // (We haven't encountered performance problems but want to play it safe.)
+    _downloadNowButton.layer.shadowPath = CGPathCreateWithRect(CGRectMake(0, 0, _downloadNowButton.frame.size.width, _downloadNowButton.frame.size.height), NULL);
+
+    // Assign the gesture recognizer.
+    UITapGestureRecognizer *buttonTapRecognizer = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(earlyExitToAppStore:)];
+    [_downloadNowButton addGestureRecognizer:buttonTapRecognizer];
+    [buttonTapRecognizer TP_RELEASE];
+
+    // Recalculate the size of the countdown text, if it exists.
+    [self resizeCountdownText];
+
+    [self.view addSubview:_downloadNowButton];
+}
+
 - (void)showCountdownText {
     _countdownLabel = [[UILabel alloc] initWithFrame:[self getCountdownLabelRect]];
     _countdownLabel.text = [self generateCountdownText];
@@ -118,6 +206,17 @@ struct TpVideoBorders {
     _countdownLabel.textColor = _textColor;
     _countdownLabel.backgroundColor = [UIColor clearColor];
     [self.view addSubview:_countdownLabel];
+}
+
+// Recalculate the placement rectangle for the countdown text.
+// We'll want to do this after drawing the download now button,
+// because the presence of the download now button can reduces
+// the size of the countdown text (so that they don't overlap).
+- (void)resizeCountdownText {
+    if (_countdownLabel != nil) {
+        _countdownLabel.frame = [self getCountdownLabelRect];
+        [_countdownLabel setNeedsDisplay];
+    }
 }
 
 - (void)showExitButton {
@@ -134,7 +233,7 @@ struct TpVideoBorders {
     // Use a custom button type. A custom button has no default styling, making it invisible but still able to receive inputs.
     _exitButton = [[UIButton buttonWithType:UIButtonTypeCustom] TP_RETAIN];
     _exitButton.frame = [self getExitButtonRect:labelRect];
-    UITapGestureRecognizer *buttonTapRecognizer = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(exitVideoEarly:)];
+    UITapGestureRecognizer *buttonTapRecognizer = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(earlyExitToEndcap:)];
     [_exitButton addGestureRecognizer:buttonTapRecognizer];
     [buttonTapRecognizer TP_RELEASE];
 
@@ -204,28 +303,50 @@ struct TpVideoBorders {
 //  - NSString *textColor - UIColor name for countdown text and exit button. e.g. 'blackColor', 'lightGrayColor', etc
 //  - NSNumber *completionTime - number of seconds until we fire the completion. Negative values are calculated from the end of the video. (e.g. -3 means 3 seconds from the end)
 //  - NSNumber *exitButtonDelay - number of seconds until we show the exit button. A value of -1 means the button is never shown.
-//  - BOOL isShowCountdown - Whether to display countdown text.
+//  - NSNumber *isShowCountdown - Whether to display countdown text.
 //  - NSString *countdownText - Text format for displaying countdown. The placeholder "%time%" will be replaced by the integer countdown.
+//  - NSString *downloadNowText - The text to display in the download now button. For example, "Download Now!".
+//  - NSString *downloadNowTextColor - The color of the text in the download now button.
+//  - NSString *downloadNowBackgroundColor - The color of the background for the download now button.
+//  - NSString *downloadNowBorderColor - The color of the border for the download now button.
 - (id)initWithContentURL:(NSURL *)URL andParams:(NSDictionary *)params {
     if ((self = [super initWithContentURL:URL])) {
+        // The video should have already been downloaded to the device, but we use this URL for referencing the video.
         _downloadURL = [[params objectForKey:@"downloadURL"] TP_RETAIN];
 
-        NSNumber *countdownTime = [params objectForKey:@"completionTime"];
-        if (countdownTime != nil) {
-            _completionTime = [countdownTime intValue];
+        // Determine the time at which we should fire the video completion.
+        NSNumber *completionTime = [params objectForKey:@"completionTime"];
+        if (completionTime != nil) {
+            _completionTime = [completionTime intValue];
         } else {
             _completionTime = -2;
         }
 
-        NSString *colorStr = [params objectForKey:@"textColor"];
-        if ((colorStr != nil) && [UIColor respondsToSelector:NSSelectorFromString(colorStr)]) {
-            _textColor = [UIColor performSelector:NSSelectorFromString(colorStr)];
-        } else {
-            TPLog(@"Invalid text color %@ was provided for video %@. Defaulting to gray.", colorStr, _downloadURL);
-            _textColor = [UIColor grayColor];
+        // Grab the color params. Check that we've been passed valid color names, otherwise use defaults.
+        // A mapping from color param names to the color value. We'll overwrite these defaults if the passed value is valid.
+        // (Note that dictionaryWithObjectsAndKeys: lists objects before their keys.)
+        NSMutableDictionary *colorParams = [NSMutableDictionary dictionaryWithObjectsAndKeys:
+                                                                @"grayColor",  @"textColor",
+                                                                @"whiteColor", @"downloadNowTextColor",
+                                                                @"blackColor", @"downloadNowBackgroundColor",
+                                                                @"whiteColor", @"downloadNowBorderColor",
+                                                                nil];
+        for (NSString *paramName in [colorParams allKeys]) {
+            NSString *paramValue = [params objectForKey:paramName];
+            if ((paramValue != nil) && [UIColor respondsToSelector:NSSelectorFromString(paramValue)]) {
+                // Overwrite the default value in the colorParams dictionary.
+                [colorParams setValue:paramValue forKey:paramName];
+            } else {
+                TPLog(@"Invalid %@ value (%@) was provided for video %@. Defaulting to %@.", paramName, paramValue, _downloadURL, [colorParams objectForKey:paramName]);
+            }
         }
-        [_textColor TP_RETAIN];
+        // Set the final colors
+        _textColor = [[UIColor performSelector:NSSelectorFromString([colorParams objectForKey:@"textColor"])] TP_RETAIN];
+        _downloadNowTextColor = [[UIColor performSelector:NSSelectorFromString([colorParams objectForKey:@"downloadNowTextColor"])] TP_RETAIN];
+        _downloadNowBackgroundColor = [[UIColor performSelector:NSSelectorFromString([colorParams objectForKey:@"downloadNowBackgroundColor"])] TP_RETAIN];
+        _downloadNowBorderColor = [[UIColor performSelector:NSSelectorFromString([colorParams objectForKey:@"downloadNowBorderColor"])] TP_RETAIN];
 
+        // Look at the exitButtonDelay to decide if and when to show the exit early button.
         NSNumber *exitButtonDelay = [params objectForKey:@"exitButtonDelay"];
         if ((exitButtonDelay != nil) && ([exitButtonDelay intValue] >= 0)) {
             _isShowExitButton = YES;
@@ -234,6 +355,7 @@ struct TpVideoBorders {
             _isShowExitButton = NO;
         }
 
+        // Grab parameters for the countdown text. First check if we should show the text at all.
         _isShowCountdown = (([params objectForKey:@"isShowCountdown"] != nil) && ([[params objectForKey:@"isShowCountdown"] intValue] == 1));
         if (_isShowCountdown) {
             // Assign the countdown text format.
@@ -247,19 +369,40 @@ struct TpVideoBorders {
             }
             [_countdownText TP_RETAIN];
         }
+
+        // Grab the text for the download now button, even if this offer won't show the button.
+        NSString *downloadNowText = [params objectForKey:@"downloadNowText"];
+        if ((downloadNowText != nil) && ([downloadNowText length] > 0)) {
+            _downloadNowText = downloadNowText;
+        } else {
+            // This is expected IFF the offer is not set to show the download now button, but we should be fine in either case.
+            _downloadNowText = @"Download Now!";
+        }
+        [_downloadNowText TP_RETAIN];
     }
     return self;
 }
 
 - (void)dealloc {
     [_downloadURL TP_RELEASE];
-    [_countdownLabel TP_RELEASE];
+    [_nextStep TP_RELEASE];
     [_countdownTimer invalidate];
     [_countdownTimer TP_RELEASE];
+
+    [_countdownLabel TP_RELEASE];
     [_countdownText TP_RELEASE];
+
+    [_downloadNowButton TP_RELEASE];
+    [_downloadNowText TP_RELEASE];
+
     [_textColor TP_RELEASE];
+    [_downloadNowTextColor TP_RELEASE];
+    [_downloadNowBackgroundColor TP_RELEASE];
+    [_downloadNowBorderColor TP_RELEASE];
+
     [_exitButtonLabel TP_RELEASE];
     [_exitButton TP_RELEASE];
+
     [super TP_DEALLOC];
 }
 
@@ -291,6 +434,10 @@ struct TpVideoBorders {
     _countdownTimer = [[NSTimer scheduledTimerWithTimeInterval:1 target:self selector:@selector(countdown) userInfo:nil repeats:YES] TP_RETAIN];
     [[NSRunLoop mainRunLoop] addTimer:_countdownTimer forMode:NSRunLoopCommonModes];
 
+    // By default, open the endcap interstitial webview when the video ends.
+    // (If the user presses the download now button, we'll set this to "appStore" before stopping the video.)
+    _nextStep = @"endcap";
+
     // Remove the default observation of the video finish event - we don't want the view view controller to automatically dismiss itself.
     [[NSNotificationCenter defaultCenter] removeObserver:self name:MPMoviePlayerPlaybackDidFinishNotification object:self.moviePlayer];
     // Use our own notification listener for video completion.
@@ -300,9 +447,18 @@ struct TpVideoBorders {
 
 #pragma mark - Video Completion methods
 
-- (void)exitVideoEarly:(UIGestureRecognizer *)gestureRecognizer {
+- (void)earlyExitToEndcap:(UIGestureRecognizer *)gestureRecognizer {
+    _nextStep = @"endcap"; // This is redundant because "endcap" is the default, but set it just in case.
     // Stop the video. This will fire the MPMoviePlayerPlaybackDidFinishNotification notification, which will send the handleVideoFinish: message.
     [self.moviePlayer stop];
+}
+
+- (void)earlyExitToAppStore:(UIGestureRecognizer *)gestureRecognizer {
+    _nextStep = @"appStore";
+    // Stop the video. This will fire the MPMoviePlayerPlaybackDidFinishNotification notification, which will send the handleVideoFinish: message.
+    [self.moviePlayer stop];
+    // Fire necessary pings (e.g. pass click id to tracking partner, record the button tap event on our server, etc)
+    [[TpVideo sharedInstance] firePingsForDownloadNowButtonClickForVideo:_downloadURL];
 }
 
 - (void)handleVideoFinish:(NSNotification *)notification {
@@ -311,8 +467,14 @@ struct TpVideoBorders {
         // We should have fired the completion by now. Make sure it's been fired.
         [[TpVideo sharedInstance] fireCompletionIfNotFiredForURL:_downloadURL];
     }
-    // Open the endcap webview.
-    [[TpVideo sharedInstance] openEndcap:_downloadURL];
+    // Move to the next step in our flow.
+    if ([_nextStep isEqualToString:@"appStore"]) {
+        // Open the app store directly.
+        [[TpVideo sharedInstance] openAppStoreFrom:@"video"];
+    } else {
+        // Open the endcap webview.
+        [[TpVideo sharedInstance] openEndcap:_downloadURL];
+    }
 }
 
 @end

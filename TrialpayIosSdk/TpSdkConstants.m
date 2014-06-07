@@ -40,8 +40,12 @@ NSString *kTPSDKEventStatusLoadingStarted = @"loadingStarted";
 NSString *kTPSDKEventStatusLoadingFinished = @"loadingFinished";
 NSString *kTPSDKEventStatusClosed = @"closed";
 
-CGFloat const kTpPopupDefaultIPhoneCornerRadius = 8.0;
-CGFloat const kTpPopupDefaultIPadCornerRadius = 12.0;
 CGFloat const kTpPopupVerticalMargin = 10;
 CGFloat const kTpPopupHorizontalMargin = 20;
+CGFloat const kTpPopupMaxIPadHeight = 360;
+CGFloat const kTpPopupMaxIPadWidth = 332;
+CGFloat const kTpPopupMaxIPhoneHeight = 410;
+CGFloat const kTpPopupMaxIPhoneWidth = 380;
 
+CGFloat const kTpDownloadNowButtonShadowRadius = 3.0;
+const int kTpVideoTypeIOSVideo = 4; // passed as vt to video event tracking (user/html/vt/index.php). must match value in lib/common/biz/video_config.php.

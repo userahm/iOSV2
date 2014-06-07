@@ -224,6 +224,7 @@ TpUrlManager *__TrialPayURLManagerSingleton = nil;
     [url appendFormat:@"%@", [TpUrlManager buildQueryString:
             @"sid", [[BaseTrialpayManager sharedInstance] sid],
             @"appver", [TpUtils appVersion],
+            @"idfa_en", [TpUtils idfa_enabled]?@"1":@"0:",
             @"idfa", [TpUtils idfa],
             @"mac", [TpUtils macAddress],
             @"sdkver", [[BaseTrialpayManager sharedInstance] sdkVersion],

@@ -44,7 +44,12 @@ extern NSString *kTPSDKEventStatusLoadingFinished;
 extern NSString *kTPSDKEventStatusClosed;
 
 
-extern CGFloat const kTpPopupDefaultIPhoneCornerRadius;
-extern CGFloat const kTpPopupDefaultIPadCornerRadius;
 extern CGFloat const kTpPopupVerticalMargin;
 extern CGFloat const kTpPopupHorizontalMargin;
+extern CGFloat const kTpPopupMaxIPadHeight;
+extern CGFloat const kTpPopupMaxIPadWidth;
+extern CGFloat const kTpPopupMaxIPhoneHeight;
+extern CGFloat const kTpPopupMaxIPhoneWidth;
+
+extern CGFloat const kTpDownloadNowButtonShadowRadius;
+extern const int kTpVideoTypeIOSVideo;

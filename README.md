@@ -1,4 +1,4 @@
-TrialPay iOS SDK (v2.2014212)
+TrialPay iOS SDK (v2.2014230)
 ================
 
 Thanks for choosing TrialPay!
@@ -11,6 +11,15 @@ Thanks for choosing TrialPay!
 
 ### Changelog
 
+#### Version 2.2014230
+
+- Improved Popup mode UI for PTM flow
+- App Trailer Improvements (iOS only)
+  - Multiple bugfixes
+  - Enabled for iOS6
+  - Download button
+- Improved handling of slow network (iOS only)
+- Engaging subtitles
 
 #### Version 2.2014212
 

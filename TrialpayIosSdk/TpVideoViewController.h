@@ -11,4 +11,5 @@
 
 @interface TpVideoViewController : MPMoviePlayerViewController
 - (id)initWithContentURL:(NSURL *)URL andParams:(NSDictionary *)params;
+- (void)showDownloadNowButton;
 @end

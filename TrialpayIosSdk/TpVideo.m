@@ -166,17 +166,23 @@ NSTimeInterval TP_DOWNLOAD_FLAG_RESET_INTERVAL = 1200.0f; // 20 minutes.
     NSMutableArray *_videosToDownload;
     BOOL _didHideStatusBar;
 
+    // View controller from which we present the entire video flow (starting with the video view controller).
+    // We don't retain or release this because we don't own it.
+    UIViewController *_baseViewController;
+
     TpVideoViewController *_videoViewController; // View controller for playing the video.
     UIWebView *_endcapWebView; // Used for displaying the endcap after video completion.
     TpVideoEndcapViewController *_endcapViewController; // View controller for endcap webview.
     TpAppStoreViewController *_storeViewController; // View controller for in-app app store.
     void (^_closeTrailerBlock)(void);
-    BOOL _isStoreViewLoaded;
-    BOOL _isStoreViewOpened;
+
+    BOOL _isInVideoFlow;
+    BOOL _isVideoOpened;
     BOOL _isWebViewLoaded;
     BOOL _isWebViewOpened;
+    BOOL _isStoreViewLoaded;
+    BOOL _isStoreViewOpened;
     BOOL _isVideoBeingDownloaded;
-    BOOL _isVideoBeingShown;
     NSDate *_isVideoBeingDownloadedResetTime;
 }
 
@@ -184,8 +190,8 @@ NSTimeInterval TP_DOWNLOAD_FLAG_RESET_INTERVAL = 1200.0f; // 20 minutes.
 
 - (id)init {
     if ((self = [super init])) {
+        _isInVideoFlow = NO;
         _isVideoBeingDownloaded = NO;
-        _isVideoBeingShown = NO;
         _isStoreViewOpened = NO;
         _isWebViewOpened = NO;
 
@@ -341,6 +347,7 @@ TpVideo *__tpVideoSingleton;
     NSUInteger existingResourceCount = [[_tpVideoMetaData allKeys] count];
     if (existingResourceCount > videoLimit) {
         // Sort the resources from oldest to newest (i.e. from nearest to farthest expiration times).
+        // We don't need to copy the comparator block because we'll have finished using it by the time we exit this function and pop the stack.
         NSArray *sortedURLs = [_tpVideoMetaData keysSortedByValueUsingComparator:^(id resource1, id resource2) {
             NSDate *resource1expirationDate = [resource1 objectForKey:@"expirationTime"];
             NSDate *resource2expirationDate = [resource2 objectForKey:@"expirationTime"];
@@ -412,6 +419,7 @@ TpVideo *__tpVideoSingleton;
         [_videosToDownload removeObjectAtIndex:0]; // This is the only time we remove objects from _videosToDownload.
     }
     TPLog(@"In videoDownloadCheck about to attempt next download in %d seconds", TP_DOWNLOAD_NEXT_VIDEO_DELAY);
+    // dispatch_after performs a copy on the block, on our behalf, so we don't need to copy it ourselves.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(TP_DOWNLOAD_NEXT_VIDEO_DELAY * NSEC_PER_SEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
         [self loadVideo:nextVideoDownloadURL];
         [nextVideoDownloadURL TP_RELEASE];
@@ -490,6 +498,7 @@ TpVideo *__tpVideoSingleton;
     if (isReattempt && ![self getMetaDataWithKey:@"hasRetriedRequest" forURL:downloadURL] && [self setMetaData:@1 withKey:@"hasRetriedRequest" forURL:downloadURL]) {
         // We would like to reattempt, we haven't already reattempted, and we've successfully set the reattempt flag. So, reattempt.
         TPLog(@"Download of %@ will be reattempted in %d seconds.", downloadURL, TP_DOWNLOAD_NEXT_VIDEO_DELAY);
+        // dispatch_after performs a copy on the block, on our behalf, so we don't need to copy it ourselves.
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(TP_DOWNLOAD_NEXT_VIDEO_DELAY * NSEC_PER_SEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
             [self downloadVideoFromURL:downloadURL];
         });
@@ -514,13 +523,6 @@ TpVideo *__tpVideoSingleton;
 // Returns an array of encoded offer ids for all video trailer offers that have preloaded completely.
 - (NSArray *)getAllStoredVideoOffers {
     NSMutableArray *storedVideoOffers = [[[NSMutableArray alloc] init] TP_AUTORELEASE];
-    if ([[[UIDevice currentDevice] systemVersion] floatValue] < 7.0) {
-        // Right now there's a strange crash that can happen when loading video trailers from the OW in iOS 6.
-        // Until we track down and fix the cause, indicate to touchpoints that no videos have been loaded.
-        // (We also don't preload videos for OW touchpoints, but we have this check as well in case the app also
-        // has an interstitial touchpoint which loaded some video trailers.)
-        return storedVideoOffers;
-    }
     for (NSString *downloadURL in [_tpVideoMetaData allKeys]) {
         // Grab the oid if the video is completely stored on the device.
         // The only time the oid will not be present is if the user has just updated from an
@@ -538,7 +540,8 @@ TpVideo *__tpVideoSingleton;
 
 // extraBlock is optional (use nil if no block is needed). If provided, this block will fire when the pixel completes.
 - (void)firePixel:(NSString *)pixelName forURL:(NSString *)downloadURL withBlock:(void (^)(NSURLResponse *, NSData *, NSError *))extraBlock {
-    NSURL *URL = [NSURL URLWithString:[self getMetaDataWithKey:pixelName forURL:downloadURL]];
+    NSString *escapedURLString = [[self getMetaDataWithKey:pixelName forURL:downloadURL] stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
+    NSURL *URL = [NSURL URLWithString:escapedURLString];
     NSURLRequest *pixelRequest = [NSURLRequest requestWithURL:URL];
     void (^completionBlock)(NSURLResponse*, NSData*, NSError*) = ^(NSURLResponse *response, NSData *data, NSError *error) {
         NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
@@ -561,7 +564,7 @@ TpVideo *__tpVideoSingleton;
         // Fire extraBlock, if provided
         if (extraBlock != nil) extraBlock(response, data, error);
     };
-    [NSURLConnection sendAsynchronousRequest:pixelRequest queue:_tpVideoOperationQueue completionHandler:completionBlock];
+    [NSURLConnection sendAsynchronousRequest:pixelRequest queue:_tpVideoOperationQueue completionHandler:[[completionBlock copy] TP_AUTORELEASE]];
 }
 
 - (void)fireImpressionForURL:(NSString *)downloadURL {
@@ -592,13 +595,87 @@ TpVideo *__tpVideoSingleton;
                 if (endcapClickID != nil) {
                     TPLog(@"Received endcap click id: %@", endcapClickID);
                     [self setMetaData:endcapClickID withKey:@"endcapClickID" forURL:downloadURL];
+
                     // Attempt to set the click id on the endcap, in case the endcap has already been opened.
                     [self performSelectorOnMainThread:@selector(provideEndcapWithClickID:) withObject:endcapClickID waitUntilDone:NO];
+
+                    // Now that we have the endcap click id (necessary for pinging the tracking partner), show the download now button.
+                    NSNumber *isShowDownloadNow = [self getMetaDataWithKey:@"isShowDownloadNow" forURL:downloadURL];
+                    if (isShowDownloadNow && [isShowDownloadNow respondsToSelector:@selector(intValue)] && ([isShowDownloadNow intValue] == 1)) {
+                        // We create the endcap click after creating the video view controller, so the controller should always exist by this point.
+                        // Perform this on the main thread. Otherwise there's a delay in drawing the button.
+                        [_videoViewController performSelectorOnMainThread:@selector(showDownloadNowButton) withObject:nil waitUntilDone:NO];
+                    }
                 }
             }
         }
     };
-    [self firePixel:@"endcapClickURL" forURL:downloadURL withBlock:clickGenerationBlock];
+    [self firePixel:@"endcapClickURL" forURL:downloadURL withBlock:[[clickGenerationBlock copy] TP_AUTORELEASE]];
+}
+
+// Fire all pixels which should be fired when the user clicks on the download now button during video playback.
+- (void)firePingsForDownloadNowButtonClickForVideo:(NSString *)downloadURL {
+    [self fireInstallTrackingForURL:downloadURL];
+    [self fireDownloadNowClickEventForURL:downloadURL];
+}
+
+// Fire the pixel to the installation tracking partner. We need to do this natively if
+// the user clicks the download now button (shown during video playback). If they go to
+// the app store after seeing our webview interstitial, then the webview will ping them instead.
+- (void)fireInstallTrackingForURL:(NSString *)downloadURL {
+    NSMutableString *trackInstallURL = [NSMutableString stringWithString:[self getMetaDataWithKey:@"trackInstallURL" forURL:downloadURL]];
+    if ((trackInstallURL == nil) || ([trackInstallURL length] <= 0)) {
+        // To have an empty value here would require an empty landing page URL on the offer, so we should never get here.
+        TPLog(@"Attempted to fire install tracking URL but install tracking URL is missing");
+        return;
+    }
+    NSString *endcapClickID = [self getMetaDataWithKey:@"endcapClickID" forURL:downloadURL];
+    if (endcapClickID == nil) {
+        // This should never happen because the download now button should only be exposed when we have the click id. But just in case:
+        endcapClickID = @"unavailable";
+    }
+
+    // Populate placeholders in the tracking URL. Replaced placeholders:
+    //  - %subid% : replaced with the endcap click id
+    //  - %sid% : replaced with the endcap click id (same as %subid% - we accept this to support old video trailer offers, created before we supported %subid%)
+    //  - %idfa% : replaced with the IDFA
+    //  - %idfa_en% : replaced with the value of the advertisingTrackingEnabled flag (correlating to Limit Ad Tracking feature)
+    // Replace %subid% and %sid%. We accept either placeholder.
+    [trackInstallURL replaceOccurrencesOfString:@"%(subid|sid)%" withString:endcapClickID options:NSRegularExpressionSearch range:NSMakeRange(0, [trackInstallURL length])];
+    // Replace %idfa%
+    [trackInstallURL replaceOccurrencesOfString:@"%idfa%" withString:[TpUtils idfa] options:0 range:NSMakeRange(0, [trackInstallURL length])];
+    // Replace %idfa_en%
+    [trackInstallURL replaceOccurrencesOfString:@"%idfa_en%" withString:[TpUtils idfa_enabled]?@"1":@"0" options:0 range:NSMakeRange(0, [trackInstallURL length])];
+
+    // The firePixel:forURL:withBlock: method takes the pixel name from stored meta data, so we'll write to the meta data before calling it.
+    // We don't want to overwrite "trackInstallURL" because we've removed the placeholders. If we overwrote the original
+    // URL and then tried to fire the pixel again, we wouldn't be able to populate the new values (like the new click id).
+    [self setMetaData:trackInstallURL withKey:@"trackInstallURLPopulated" forURL:downloadURL];
+    [self firePixel:@"trackInstallURLPopulated" forURL:downloadURL withBlock:nil];
+}
+
+// Record the event for the user clicking on the download now button. (This is treated as a video event, not as an offer click.)
+- (void)fireDownloadNowClickEventForURL:(NSString *)downloadURL {
+    NSMutableString *trackClickURL = [NSMutableString stringWithString:[self getMetaDataWithKey:@"downloadNowTrackClickURL" forURL:downloadURL]];
+    if ((trackClickURL == nil) || ([trackClickURL length] <= 0)) {
+        // This should never happen.
+        TPLog(@"Attempted to fire download now click tracking URL but URL is missing");
+        return;
+    }
+    NSString *endcapClickID = [self getMetaDataWithKey:@"endcapClickID" forURL:downloadURL];
+    if (endcapClickID == nil) {
+        // This should never happen because the download now button should only be exposed when we have the click id. But just in case:
+        endcapClickID = @"unavailable";
+    }
+
+    // Populate %subid% placeholder in the tracking URL.
+    [trackClickURL replaceOccurrencesOfString:@"%subid%" withString:endcapClickID options:0 range:NSMakeRange(0, [trackClickURL length])];
+
+    // The firePixel:forURL:withBlock: method takes the pixel name from stored meta data, so we'll write to the meta data before calling it.
+    // We don't want to overwrite "downloadNowTrackClickURL" because we've removed the placeholders. If we overwrote the original
+    // URL and then tried to fire the pixel again, we wouldn't be able to populate the new values (like the new click id).
+    [self setMetaData:trackClickURL withKey:@"downloadNowTrackClickURLPopulated" forURL:downloadURL];
+    [self firePixel:@"downloadNowTrackClickURLPopulated" forURL:downloadURL withBlock:nil];
 }
 
 #pragma mark - Status Bar
@@ -639,11 +716,18 @@ TpVideo *__tpVideoSingleton;
 //  - NSNumber *exit_delay - number of seconds until we show the exit button. A value of -1 means the button is never shown.
 //  - NSNumber *use_cd - 1 or 0, whether to display the countdown text
 //  - NSString *tc - color for countdown text and exit button. Must correspond to a UIColor color name without the 'Color' suffix. (e.g. 'black', 'lightGray')
+//  - NSNumber *use_dnb - 1 or 0, whether to display the download now button
 //  - NSNumber *exp - the time at which to remove local video data, given in seconds from now
 //  - NSString *oid - the encoded offer id
 //
 // Optional parameters:
 //  - NSString *cd_text - The countdown text to display, with %time% used as placeholder for the numeric countdown. e.g. "Video ends in %time% seconds".
+//  - NSString *dnb_text - the text to display in the download now button. e.g. "Download Now!"
+//  - NSString *dnb_text_c - color for download now button text. Must correspond to a UIColor color name without the 'Color' suffix. (e.g. 'black', 'lightGray')
+//  - NSString *dnb_back_c - color for download now button background. Must correspond to a UIColor color name without the 'Color' suffix. (e.g. 'black', 'lightGray')
+//  - NSString *dnb_bord_c - color for download now button border (including shadow). Must correspond to a UIColor color name without the 'Color' suffix. (e.g. 'black', 'lightGray')
+//  - NSString *dnb_track_click_url - the URL for recording the user click on the download now button. This is recorded on the server as a video event, not an offer click.
+//  - NSString *track_install_url - the tracking partner URL to ping when the user clicks the download now button. This should have %subid% and %idfa% placeholders.
 - (void)initializeVideoWithParams:(NSDictionary *)params {
     // A mapping from incoming API parameters and the required SDK parameters to which they map.
     NSDictionary *requiredParamNames = @{@"dl_url" :          @"downloadURL",
@@ -659,6 +743,7 @@ TpVideo *__tpVideoSingleton;
                                          @"exit_delay" :      @"exitButtonDelay",
                                          @"use_cd" :          @"isShowCountdown",
                                          @"tc" :              @"textColor",
+                                         @"use_dnb" :         @"isShowDownloadNow",
                                          @"exp" :             @"expirationTime",
                                          @"oid" :             @"oid"};
     // Check presence of required params
@@ -689,8 +774,25 @@ TpVideo *__tpVideoSingleton;
         [self setMetaData:paramValue withKey:SDKParamName forURL:downloadURL];
     }
     // Store optional attributes.
-    NSString *countdownText = [params objectForKey:@"cd_text"] ? [params objectForKey:@"cd_text"] : @"";
+    // Right now we store default values for all of these attributes. This is so that we don't
+    // have to check their presence in other parts of the flow.
+    NSString *countdownText = [params objectForKey:@"cd_text"] ? [params objectForKey:@"cd_text"] : @""; // If blank, we TPLog and default to "%time%s"
     [self setMetaData:countdownText withKey:@"countdownText" forURL:downloadURL];
+    NSString *downloadNowText = [params objectForKey:@"dnb_text"] ? [params objectForKey:@"dnb_text"] : @""; // If blank, we default to "Download Now!"
+    [self setMetaData:downloadNowText withKey:@"downloadNowText" forURL:downloadURL];
+    NSString *downloadNowTrackClickURL = [params objectForKey:@"dnb_track_click_url"] ? [params objectForKey:@"dnb_track_click_url"] : @"";
+    [self setMetaData:downloadNowTrackClickURL withKey:@"downloadNowTrackClickURL" forURL:downloadURL];
+    NSString *trackInstallURL = [params objectForKey:@"track_install_url"] ? [params objectForKey:@"track_install_url"] : @"";
+    [self setMetaData:trackInstallURL withKey:@"trackInstallURL" forURL:downloadURL];
+    NSString *downloadNowTextColor = [params objectForKey:@"dnb_text_c"] ? [params objectForKey:@"dnb_text_c"] : @"white";
+    downloadNowTextColor = [NSString stringWithFormat:@"%@Color", downloadNowTextColor];
+    [self setMetaData:downloadNowTextColor withKey:@"downloadNowTextColor" forURL:downloadURL];
+    NSString *downloadNowBackgroundColor = [params objectForKey:@"dnb_back_c"] ? [params objectForKey:@"dnb_back_c"] : @"black";
+    downloadNowBackgroundColor = [NSString stringWithFormat:@"%@Color", downloadNowBackgroundColor];
+    [self setMetaData:downloadNowBackgroundColor withKey:@"downloadNowBackgroundColor" forURL:downloadURL];
+    NSString *downloadNowBorderColor = [params objectForKey:@"dnb_bord_c"] ? [params objectForKey:@"dnb_bord_c"] : @"white";
+    downloadNowBorderColor = [NSString stringWithFormat:@"%@Color", downloadNowBorderColor];
+    [self setMetaData:downloadNowBorderColor withKey:@"downloadNowBorderColor" forURL:downloadURL];
 
     // Clear the hasFiredCompletion flag
     [self removeMetaDataWithKey:@"hasFiredCompletion" forURL:downloadURL];
@@ -719,14 +821,18 @@ TpVideo *__tpVideoSingleton;
 
 // Enter the video trailer flow, starting with the display of the video trailer.
 // The flow will be presented modally from baseViewController.
-// completionBlock will be executed when we close the video trailer flow (i.e. from inside closeTrailer). This can be nil.
+// completionBlock will be executed when we close the video trailer flow (i.e. from inside closeTrailerFlow). This can be nil.
 - (void)playVideoWithURL:(NSString *)downloadURL fromViewController:(UIViewController *)baseViewController withBlock:(void (^)(void))completionBlock {
     // Check if we already have the video up, this prevents a "double-click" making 2 video objects to run, resulting in frozen UI. (iOS6/iphone4)
-    if (_isVideoBeingShown) {
+    if (_isInVideoFlow) {
         // Don't fire the completion block because the user is already viewing a valid trailer flow, which will fire its own completion block.
         return;
     }
-    _isVideoBeingShown = YES;
+    _isInVideoFlow = YES;
+    _isVideoOpened = NO; // We'll set to YES once we've presented the video view controller.
+
+    // Store the baseViewController. We don't retain or release this because we don't own it.
+    _baseViewController = baseViewController;
 
     // Store the completionBlock
     [_closeTrailerBlock TP_RELEASE]; // Release the existing block, if present.
@@ -737,14 +843,14 @@ TpVideo *__tpVideoSingleton;
     if (![self getMetaDataWithKey:@"isCompleteVideoStored" forURL:downloadURL]) {
         TPLog(@"Video resource %@ is not stored locally. Aborting video playback.", downloadURL);
         [self fireCloseTrailerBlock];
-        _isVideoBeingShown = NO;
+        _isInVideoFlow = NO;
         return;
     }
     NSString *filePath = [self getLocalVideoPathForURL:downloadURL];
     if (filePath == nil) {
         TPLog(@"Cannot determine local video file path for resource %@. Aborting video playback.", downloadURL);
         [self fireCloseTrailerBlock];
-        _isVideoBeingShown = NO;
+        _isInVideoFlow = NO;
         return;
     }
 
@@ -752,42 +858,70 @@ TpVideo *__tpVideoSingleton;
     [self createEndcap:downloadURL];
     [self createAppStoreController:[self getMetaDataWithKey:@"appID" forURL:downloadURL]];
 
-    // Present the video.
+    // Don't present and play the video controller until the player has loaded enough to begin playback.
+    // (This is necessary to prevent crashes on iOS 6.)
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(videoLoadStateChangeObserver:) name:@"MPMoviePlayerLoadStateDidChangeNotification" object:_videoViewController.moviePlayer];
+
+    // Prepare the video.
     NSDictionary *viewControllerParams = [NSDictionary dictionaryWithObjectsAndKeys:
-        downloadURL,                                                     @"downloadURL",
-        [self getMetaDataWithKey:@"isShowCountdown" forURL:downloadURL], @"isShowCountdown",
-        [self getMetaDataWithKey:@"textColor" forURL:downloadURL],       @"textColor",
-        [self getMetaDataWithKey:@"completionTime" forURL:downloadURL],  @"completionTime",
-        [self getMetaDataWithKey:@"exitButtonDelay" forURL:downloadURL], @"exitButtonDelay",
-        [self getMetaDataWithKey:@"countdownText" forURL:downloadURL],   @"countdownText",
+        downloadURL,                                                                @"downloadURL",
+        [self getMetaDataWithKey:@"isShowCountdown" forURL:downloadURL],            @"isShowCountdown",
+        [self getMetaDataWithKey:@"textColor" forURL:downloadURL],                  @"textColor",
+        [self getMetaDataWithKey:@"completionTime" forURL:downloadURL],             @"completionTime",
+        [self getMetaDataWithKey:@"exitButtonDelay" forURL:downloadURL],            @"exitButtonDelay",
+        [self getMetaDataWithKey:@"countdownText" forURL:downloadURL],              @"countdownText",
+        [self getMetaDataWithKey:@"downloadNowText" forURL:downloadURL],            @"downloadNowText",
+        [self getMetaDataWithKey:@"downloadNowTextColor" forURL:downloadURL],       @"downloadNowTextColor",
+        [self getMetaDataWithKey:@"downloadNowBackgroundColor" forURL:downloadURL], @"downloadNowBackgroundColor",
+        [self getMetaDataWithKey:@"downloadNowBorderColor" forURL:downloadURL],     @"downloadNowBorderColor",
         nil];
     [_videoViewController TP_RELEASE]; // Release any existing controller.
     _videoViewController = [[TpVideoViewController alloc] initWithContentURL:[NSURL fileURLWithPath:filePath] andParams:viewControllerParams];
     _videoViewController.moviePlayer.controlStyle = MPMovieControlStyleNone;
     [_videoViewController.moviePlayer prepareToPlay];
 
-    [baseViewController presentViewController:_videoViewController animated:YES completion:nil];
-    [_videoViewController.moviePlayer play];
+}
+
+// Handle a change in the loaded state of the video. We'll use this to present the video
+// controller if the video has loaded sufficiently to begin playback.
+- (void)videoLoadStateChangeObserver:(NSNotification *)notification {
+    if ((_videoViewController != nil) && (_baseViewController != nil)) { // Both view controllers are always expected to exist at this point, but check anyway.
+        // Confirm:
+        //  - That we haven't yet presented the video view controller
+        //  - That the player has loaded enough data for playback to begin
+        MPMovieLoadState loadState = _videoViewController.moviePlayer.loadState;
+        TPLog(@"In videoLoadStateChangeObserver with loaded state: %d", loadState);
+        if (!_isVideoOpened && (loadState & MPMovieLoadStatePlayable)) { // bit-wise AND
+            // Present and play the video.
+            TPLog(@"Presenting video player from videoLoadStateChangeObserver");
+            [_videoViewController.moviePlayer setShouldAutoplay:YES]; // Play the video as soon as it's presented. This is default but added for code clarity.
+            [_baseViewController presentViewController:_videoViewController animated:YES completion:nil];
+            _isVideoOpened = YES;
+        }
+    }
 }
 
 // Close the entire video trailer flow
-- (void)closeTrailer {
-    // Grab the view controller at the root of our view hierachy. This should be the view from which the user entered the interstitial flow.
-    UIViewController *baseViewController = _videoViewController.presentingViewController;
-    if (baseViewController == nil) {
-        baseViewController = [UIApplication sharedApplication].keyWindow.rootViewController;
-    }
-    // Dismiss the video view controller. All the CPI view controllers are presented from the video view controller, so
-    // dismissing it will also dismiss the endcap and app store controllers, if present.
+- (void)closeTrailerFlow {
+    [self stopEndcapWebViewLoading];
     [self revertStatusBar];
 
-    [baseViewController dismissViewControllerAnimated:YES completion:^{
+    // Dismiss the video view controller. All the view controllers are presented from the video view controller, so
+    // dismissing it will also dismiss the endcap and app store controllers, if present.
+    UIViewController *baseViewController = _baseViewController;
+    if (baseViewController == nil) {
+        // This is unexpected, but fall back if it happens.
+        baseViewController = [UIApplication sharedApplication].keyWindow.rootViewController;
+    }
+    void (^completionBlock)(void) = ^{
+        _isInVideoFlow = NO;
+        _isVideoOpened = NO;
         _isWebViewOpened = NO;
         _isStoreViewOpened = NO;
-        _isVideoBeingShown = NO;
 
         [[TpVideo sharedInstance] fireCloseTrailerBlock];
-    }];
+    };
+    [baseViewController dismissViewControllerAnimated:YES completion:[[completionBlock copy] TP_AUTORELEASE]];
 }
 
 - (void)fireCloseTrailerBlock {
@@ -810,8 +944,11 @@ TpVideo *__tpVideoSingleton;
         // Assume the webview loads correctly. If it fails to load then we'll set this flag to NO.
         _isWebViewLoaded = YES;
 
+        // Release the existing webview, if present.
+        [self stopEndcapWebViewLoading];
+        [_endcapWebView TP_RELEASE];
+
         // Load the new endcap in the background.
-        [_endcapWebView TP_RELEASE]; // Release the existing webview, if present.
         UIView *rootView = [UIApplication sharedApplication].keyWindow.rootViewController.view;
         _endcapWebView = [[UIWebView alloc] initWithFrame:rootView.bounds];
         _endcapWebView.delegate = self;
@@ -832,6 +969,14 @@ TpVideo *__tpVideoSingleton;
     } else {
         TPLog(@"Could not create video endcap for resource %@ - missing endcap URL", downloadURL);
         _isWebViewLoaded = NO;
+    }
+}
+
+// This should be called before releasing the endcap webview.
+- (void)stopEndcapWebViewLoading {
+    if (_endcapWebView != nil) {
+        [_endcapWebView stopLoading];
+        _endcapWebView.delegate = nil;
     }
 }
 
@@ -859,7 +1004,7 @@ TpVideo *__tpVideoSingleton;
         // Pass the click ID to the endcap. We may not have this yet, but will call this again when the click API completes.
         [self provideEndcapWithClickID:[self getMetaDataWithKey:@"endcapClickID" forURL:downloadURL]];
     } else {
-        [self closeTrailer];
+        [self closeTrailerFlow];
     }
 }
 
@@ -867,11 +1012,11 @@ TpVideo *__tpVideoSingleton;
 
 - (BOOL)webView:(UIWebView *)webView shouldStartLoadWithRequest:(NSURLRequest *)request navigationType:(UIWebViewNavigationType)navigationType {
     if ([request.URL.host isEqualToString:@"showAppStore"]) {
-        [self openAppStore];
+        [self openAppStoreFrom:@"endcap"];
         return NO;
     }
     if ([request.URL.host isEqualToString:@"closeEndcap"]) {
-        [self closeTrailer];
+        [self closeTrailerFlow];
         return NO;
     }
     return YES;
@@ -881,7 +1026,7 @@ TpVideo *__tpVideoSingleton;
     TPLog(@"Failed to load interstitial webview -- Error code: %ld. Error description: %@", (long)error.code, error.localizedDescription);
     // Mark the webview as unloaded so that we abort any future requests to open it. If we've already opened the webview, abort now.
     _isWebViewLoaded = NO;
-    if (_isWebViewOpened) [self closeTrailer];
+    if (_isWebViewOpened) [self closeTrailerFlow];
 }
 
 - (void)webViewDidFinishLoad:(UIWebView *)webView {
@@ -906,29 +1051,37 @@ TpVideo *__tpVideoSingleton;
 
     _storeViewController = [[TpAppStoreViewController alloc] init];
     [_storeViewController setDelegate:self];
-    [_storeViewController loadProductWithParameters:@{SKStoreProductParameterITunesItemIdentifier : appID} completionBlock:^(BOOL result, NSError *error) {
+    void (^loadCompleteBlock)(BOOL, NSError *) = ^(BOOL result, NSError *error) {
         if (error) {
             TPLog(@"Failed to load app store for application %@ -- Error code: %ld. Error description: %@", appID, (long)error.code, error.localizedDescription);
             // Mark the store as unloaded so that we abort any future requests to open it. If we've already opened the store, abort now.
             _isStoreViewLoaded = NO;
-            if (_isStoreViewOpened) [self closeTrailer];
+            if (_isStoreViewOpened) [self closeTrailerFlow];
         }
-    }];
+    };
+    [_storeViewController loadProductWithParameters:@{SKStoreProductParameterITunesItemIdentifier : appID} completionBlock:[[loadCompleteBlock copy] TP_AUTORELEASE]];
 }
 
 // Display the previously-loaded in-app app store.
-- (void)openAppStore {
+// viewControllerDescriptor should be either "video" or "endcap", indicating the view controller from which to open the app store.
+// (In reality, anything besides "video" means we'll open the app store from the endcap webview.)
+- (void)openAppStoreFrom:(NSString *)viewControllerDescriptor {
     if (_isStoreViewLoaded) {
         _isStoreViewOpened = YES;
-        [_endcapViewController presentViewController:_storeViewController animated:YES completion:nil];
+        // Determine the view controller from which to present the app store.
+        if ((viewControllerDescriptor != nil) && [viewControllerDescriptor isEqualToString:@"video"]) {
+            [_videoViewController presentViewController:_storeViewController animated:YES completion:nil];
+        } else {
+            [_endcapViewController presentViewController:_storeViewController animated:YES completion:nil];
+        }
     } else {
-        [self closeTrailer];
+        [self closeTrailerFlow];
     }
 }
 
 // Delegate method for app store view.
 - (void)productViewControllerDidFinish:(SKStoreProductViewController *)viewController {
-    [self closeTrailer];
+    [self closeTrailerFlow];
 }
 
 @end
