@@ -540,8 +540,7 @@ TpVideo *__tpVideoSingleton;
 
 // extraBlock is optional (use nil if no block is needed). If provided, this block will fire when the pixel completes.
 - (void)firePixel:(NSString *)pixelName forURL:(NSString *)downloadURL withBlock:(void (^)(NSURLResponse *, NSData *, NSError *))extraBlock {
-    NSString *escapedURLString = [[self getMetaDataWithKey:pixelName forURL:downloadURL] stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
-    NSURL *URL = [NSURL URLWithString:escapedURLString];
+    NSURL *URL = [NSURL URLWithString:[self getMetaDataWithKey:pixelName forURL:downloadURL]];
     NSURLRequest *pixelRequest = [NSURLRequest requestWithURL:URL];
     void (^completionBlock)(NSURLResponse*, NSData*, NSError*) = ^(NSURLResponse *response, NSData *data, NSError *error) {
         NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
@@ -646,6 +645,10 @@ TpVideo *__tpVideoSingleton;
     [trackInstallURL replaceOccurrencesOfString:@"%idfa%" withString:[TpUtils idfa] options:0 range:NSMakeRange(0, [trackInstallURL length])];
     // Replace %idfa_en%
     [trackInstallURL replaceOccurrencesOfString:@"%idfa_en%" withString:[TpUtils idfa_enabled]?@"1":@"0" options:0 range:NSMakeRange(0, [trackInstallURL length])];
+    // Remove any other placeholders in the tracking URL - no other process will populate them by this point, and their
+    // presence in the URL will cause the request to fail. (We could URL-encode the whole URL, but this would result
+    // in other values like the SID being double-encoded.)
+    [trackInstallURL replaceOccurrencesOfString:@"%(.*?)%" withString:@"" options:NSRegularExpressionSearch range:NSMakeRange(0, [trackInstallURL length])];
 
     // The firePixel:forURL:withBlock: method takes the pixel name from stored meta data, so we'll write to the meta data before calling it.
     // We don't want to overwrite "trackInstallURL" because we've removed the placeholders. If we overwrote the original

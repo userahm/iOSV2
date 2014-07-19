@@ -264,7 +264,7 @@ NSMutableDictionary *_interstitialAvailabilityErrorWaitTimes = nil;
 
 #pragma mark - Get SDK Version
 - (NSString*)sdkVersion {
-    return @"ios.2.2014230";
+    return @"ios.2.2014284";
 }
 
 #pragma mark - BaseTrialpayManager getter/setter

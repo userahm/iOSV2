@@ -708,8 +708,8 @@
     }
 }
 
-//tp://changeHeaderHeight/[height] - set the header height to [height] (pixel density = 1)
-- (void) navChangeHeaderHeight:(NSString *)heightString {
+//tp://changeNavBarHeight/[height] - set the header height to [height] (pixel density = 1)
+- (void) navChangeNavBarHeight:(NSString *)heightString {
     int height = [heightString intValue];
     TPLog(@"New height is %d", height);
 
