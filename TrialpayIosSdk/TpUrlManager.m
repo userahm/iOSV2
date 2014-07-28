@@ -8,7 +8,6 @@
 #import "BaseTrialpayManager.h"
 #import "TpDataStore.h"
 #import "TpArcSupport.h"
-#import "TrialpayManager.h"
 #import "TpVideo.h"
 
 // Terminator for buildQueryString, intentionally asymmetric

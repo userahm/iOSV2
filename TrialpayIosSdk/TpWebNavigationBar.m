@@ -7,7 +7,7 @@
 #import "TpWebNavigationBar.h"
 #import "TpUrlManager.h"
 #import "TpUtils.h"
-
+#import "TpConstants.h"
 
 @implementation TpWebNavigationBar
 
@@ -149,7 +149,7 @@ NSMutableArray* jsCommands;
         NSString *jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
         [self executeCommand:[NSString stringWithFormat:@"onSDKEvent(%@)", jsonString]];
 #if defined(__TRIALPAY_USE_EXCEPTIONS)
-    @catch (NSException *exception) {
+    } @catch (NSException *exception) {
         TPLog(@"%@\n%@", exception, [exception callStackSymbols]);
     }
 #endif

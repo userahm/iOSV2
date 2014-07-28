@@ -9,10 +9,10 @@
 #import "TpDataStore.h"
 #import "TpArcSupport.h"
 #import "TpDealspotView.h"
-#import "TrialpayManager.h"
 #import "TpUtils.h"
 #import "TpUrlManager.h"
 #import "TpVideo.h"
+#import "TpConstants.h"
 
 // how many UNIX timestamps for the customer's last sessions will be stored
 #define TP_MAX_VISIT_TIMESTAMPS 5
@@ -264,7 +264,7 @@ NSMutableDictionary *_interstitialAvailabilityErrorWaitTimes = nil;
 
 #pragma mark - Get SDK Version
 - (NSString*)sdkVersion {
-    return @"ios.2.2014284";
+    return @"ios.2.2014310";
 }
 
 #pragma mark - BaseTrialpayManager getter/setter

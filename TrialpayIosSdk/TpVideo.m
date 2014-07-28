@@ -13,6 +13,7 @@
 #import "TpDataStore.h"
 #import "TpArcSupport.h"
 #import "TpUtils.h"
+#import "TpConstants.h"
 
 // times given in seconds. in sdk3 these will be controlled by the config.
 int TP_DOWNLOAD_NEXT_VIDEO_DELAY = 10;
@@ -893,7 +894,7 @@ TpVideo *__tpVideoSingleton;
         //  - That we haven't yet presented the video view controller
         //  - That the player has loaded enough data for playback to begin
         MPMovieLoadState loadState = _videoViewController.moviePlayer.loadState;
-        TPLog(@"In videoLoadStateChangeObserver with loaded state: %d", loadState);
+        TPLog(@"In videoLoadStateChangeObserver with loaded state: %d", (int)loadState);
         if (!_isVideoOpened && (loadState & MPMovieLoadStatePlayable)) { // bit-wise AND
             // Present and play the video.
             TPLog(@"Presenting video player from videoLoadStateChangeObserver");
