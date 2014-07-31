@@ -42,7 +42,7 @@ Thanks for choosing TrialPay!
 
 #### Version 2.2014120
 
-No release notes.
+- App Trailer for Interstitial/Dealspot flows
 
 #### Version 2.2014080
 - Mobile GIF
