@@ -6,7 +6,7 @@ Thanks for choosing TrialPay!
 ### More documentation
 
 - [Sign for a Merchant account](https://merchant.trialpay.com/register/?t=mb)
-- [API Reference](http://help.trialpay.com/docs/iOS/index.html)
+- [Help and API Reference](http://help.trialpay.com/docs/iOS/index.html)
 
 ### Changelog
 
