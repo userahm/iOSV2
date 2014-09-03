@@ -31,6 +31,8 @@
 @implementation TpWebView {
     CGFloat popupHorizontalMargin;
     CGFloat popupVerticalMargin;
+    
+    CGSize offerwallContainerSizeDelta;
 }
 
 /*
@@ -48,19 +50,7 @@
         popupHorizontalMargin = kTpPopupHorizontalMargin;
         popupVerticalMargin   = kTpPopupVerticalMargin;
 
-        CGRect screenRect =  [[UIScreen mainScreen] bounds];
-        CGFloat width = screenRect.size.width - (2 * kTpPopupHorizontalMargin);
-        CGFloat height = screenRect.size.height - (2 * kTpPopupVerticalMargin);
-        CGFloat maxWidth = (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad)? kTpPopupMaxIPadWidth: kTpPopupMaxIPhoneWidth;
-        CGFloat maxHeight = (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad)? kTpPopupMaxIPadHeight: kTpPopupMaxIPhoneHeight;
-
-        if (width > maxWidth) {
-            popupHorizontalMargin = ABS(width- maxWidth)/2;
-        }
-        if (height > maxHeight) {
-            popupVerticalMargin   = ABS(height- maxHeight)/2;
-        }
-
+        offerwallContainerSizeDelta = CGSizeMake(0, 0);
     }
     return self;
 }
@@ -94,7 +84,12 @@
  */
 - (void)loadRequest:(NSString *)urlString {
     TPLogEnter;
-    [self setInitialUrl:[NSString stringWithFormat:@"%@&tp_base_page=1", urlString]];
+    
+    if ([urlString rangeOfString:@"tp_base_page=1"].location == NSNotFound)
+        [self setInitialUrl:[NSString stringWithFormat:@"%@&tp_base_page=1", urlString]];
+    else
+        [self setInitialUrl:urlString];
+    
     if (nil != self.offerwallContainer) {
         NSURL *url = [NSURL URLWithString:self.initialUrl];
         NSURLRequest *request = [NSURLRequest requestWithURL:url];
@@ -344,8 +339,14 @@
     CGFloat mainWidth = self.bounds.size.width - horizontalMargin * 2;
     CGFloat mainHeight = self.bounds.size.height - verticalMargin * 2 - startY;
     if (self.viewMode == TPViewModePopup) {
+        
+        mainHeight-=offerwallContainerSizeDelta.height;
+        verticalMargin += offerwallContainerSizeDelta.height/2;
+        
+        mainWidth-=offerwallContainerSizeDelta.width;
+        horizontalMargin += offerwallContainerSizeDelta.width/2;
+        
         self.mainView.bounds = CGRectMake(0, 0, mainWidth, mainHeight);
-
     }
 
     // on iOS7 the frame needs to be moved as well.
@@ -505,6 +506,10 @@
             }
             return NO;
         }
+        else if ([request.URL.host isEqualToString:@"adjustSize"]) {
+            [self adjustOfferwallContainerSize];
+            return NO;
+        }
     }
 
     // if the special protocol starts with "tpvideo", stop the URL load and open the video within our video trailer flow.
@@ -538,6 +543,9 @@
                                         kTPSDKEventSourceKey: [self getWebViewName:webView],
                                         kTPSDKEventNewStatusKey: kTPSDKEventStatusLoadingStarted,
                                         kTPSDKEventURLKey: self.currentRequest.URL.absoluteString}];
+    
+    //reset size adjustments for offerwallContainer
+    offerwallContainerSizeDelta = CGSizeMake(0, 0);
 }
 
 - (void)webViewDidFinishLoad:(UIWebView *)webView {
@@ -743,6 +751,38 @@
     [self.offerwallContainer stopLoading];
     self.offerContainer.delegate = nil;
     [self.offerContainer stopLoading];
+}
+
+- (void)adjustOfferwallContainerSize
+{
+    if (self.offerwallContainer != nil && self.viewMode == TPViewModePopup) {
+        // reset old ajustments
+        offerwallContainerSizeDelta = CGSizeMake(0, 0);
+        [self setNeedsLayout];
+        // force layout
+        [self layoutIfNeeded];
+        
+        CGRect originaFrame = self.offerwallContainer.frame;
+        
+        CGFloat width = [[self.offerwallContainer stringByEvaluatingJavaScriptFromString:@"document.documentElement.offsetWidth"] floatValue];
+        CGFloat height = [[self.offerwallContainer stringByEvaluatingJavaScriptFromString:@"document.documentElement.offsetHeight"] floatValue];
+        
+        CGSize fittingSize = CGSizeMake(width, height);
+        
+        if (fittingSize.height < originaFrame.size.height && !CGSizeEqualToSize(fittingSize, CGSizeMake(0, 0)))
+            offerwallContainerSizeDelta.height = originaFrame.size.height - fittingSize.height;
+        else
+            offerwallContainerSizeDelta.height = 0;
+        
+        if (fittingSize.width < originaFrame.size.width && !CGSizeEqualToSize(fittingSize, CGSizeMake(0, 0)))
+            offerwallContainerSizeDelta.width = originaFrame.size.width - fittingSize.width;
+        else
+            offerwallContainerSizeDelta.width = 0;
+        
+        [self setNeedsLayout];
+    }
+    else
+        offerwallContainerSizeDelta = CGSizeMake(0, 0);
 }
 
 @end

@@ -104,13 +104,13 @@ BOOL __trialpayVerbose=YES;
                                   macAddress[0], macAddress[1], macAddress[2],
                                   macAddress[3], macAddress[4], macAddress[5]];
     
+    // Release the buffer memory
+    free(msgBuffer);
+    
     if (macAddress[0] == 2 && macAddress[1] == macAddress[2] == macAddress[3] == macAddress[4] == macAddress[5] == 0) {
         // iOS7 result in 02000000000000, so lets return an empty string
         return @"";
     }
-    
-    // Release the buffer memory
-    free(msgBuffer);
     
     return macAddressString;
 }
@@ -194,6 +194,16 @@ BOOL __trialpayVerbose=YES;
     return basicMask;
 }
 
++ (void)operation:(NSOperation*)operation sleepFor:(int)secondsValid {
+    // Lets allow the thread to die quickly (20s) if it was canceled during the wait
+    // and wait period is long: one day/week
+    int totalWait = 0;
+    int stepWait = 20; // wait 20 sec at a time.
+    while (totalWait < secondsValid && ![operation isCancelled]) {
+        [NSThread sleepForTimeInterval:stepWait];
+        totalWait += stepWait;
+    }
+}
 
 @end
 

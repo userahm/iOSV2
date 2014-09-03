@@ -15,10 +15,12 @@
 @implementation TpVideoViewController {
     NSString *_downloadURL;
     NSTimer *_countdownTimer;
+    int _duration;
     int _videoTimeRemaining;
     int _completionTime;;
     UIColor *_textColor;
     NSString *_nextStep;
+    BOOL _didVideoAppear;
     // The following properties control the exit button
     UIButton *_exitButton;
     UILabel *_exitButtonLabel;
@@ -186,7 +188,9 @@ struct TpVideoBorders {
     _downloadNowButton.layer.shadowOffset = CGSizeMake(0.0f, 0.0f); // We want the shadow to be centered on the button.
     // We explicity set the path for the shadow. This is the default path, but setting it explicitly helps rendering performance.
     // (We haven't encountered performance problems but want to play it safe.)
-    _downloadNowButton.layer.shadowPath = CGPathCreateWithRect(CGRectMake(0, 0, _downloadNowButton.frame.size.width, _downloadNowButton.frame.size.height), NULL);
+    CGPathRef path = CGPathCreateWithRect(CGRectMake(0, 0, _downloadNowButton.frame.size.width, _downloadNowButton.frame.size.height), NULL);
+    _downloadNowButton.layer.shadowPath = path;
+    CGPathRelease(path);
 
     // Assign the gesture recognizer.
     UITapGestureRecognizer *buttonTapRecognizer = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(earlyExitToAppStore:)];
@@ -246,14 +250,19 @@ struct TpVideoBorders {
 // Runs every second
 - (void)countdown {
     if (_videoTimeRemaining == VIDEO_TIME_REMAINING_UNITIALIZED) {
-        // Confirm that the moviePlayer is fully initialized.
+        // Confirm that the moviePlayer is fully initialized. We need this information for placing
+        // display elements, as well as getting the duration information for old video offers.
         if ((self.moviePlayer == nil) || (self.moviePlayer.duration <= 0) ||
             (self.moviePlayer.naturalSize.width <= 0) || (self.moviePlayer.naturalSize.height <= 0)) {
             // Do nothing for now (we'll check again the next time we run this timer).
             TPLog(@"moviePlayer is still being initialized - returning from countdown early");
             return;
         } else {
-            _videoTimeRemaining = (int)self.moviePlayer.duration;
+            if (_duration <= 0) {
+                // Video was set up before we required this information. Try to read it from the file.
+                _duration = (int)self.moviePlayer.duration;
+            }
+            _videoTimeRemaining = _duration;
         }
     } else {
         _videoTimeRemaining--;
@@ -263,10 +272,10 @@ struct TpVideoBorders {
     }
 
     // Completion firing. Confirm that we're at least 5 seconds into the video, so that the click API request has time to complete.
-    if ((self.moviePlayer.duration - _videoTimeRemaining) >= 5) {
+    if ((_duration - _videoTimeRemaining) >= 5) {
         if (_completionTime >= 0) {
             // complete at X seconds from the start of the video
-            if ((self.moviePlayer.duration - _videoTimeRemaining) >= _completionTime) {
+            if ((_duration - _videoTimeRemaining) >= _completionTime) {
                 [[TpVideo sharedInstance] fireCompletionIfNotFiredForURL:_downloadURL];
             }
         } else {
@@ -288,7 +297,7 @@ struct TpVideoBorders {
     // Showing the exit button.
     if (_isShowExitButton) {
         if (_exitButton == nil) {
-            if ((self.moviePlayer.duration - _videoTimeRemaining) >= _exitButtonDelay) {
+            if ((_duration - _videoTimeRemaining) >= _exitButtonDelay) {
                [self showExitButton];
             }
         }
@@ -300,6 +309,7 @@ struct TpVideoBorders {
 // Initialize the view controller.
 // Params:
 //  - NSString *downloadURL - The resource URL from which we download the video. used for identification.
+//  - NSNumber *duration - The duration, in seconds, of the app trailer video.
 //  - NSString *textColor - UIColor name for countdown text and exit button. e.g. 'blackColor', 'lightGrayColor', etc
 //  - NSNumber *completionTime - number of seconds until we fire the completion. Negative values are calculated from the end of the video. (e.g. -3 means 3 seconds from the end)
 //  - NSNumber *exitButtonDelay - number of seconds until we show the exit button. A value of -1 means the button is never shown.
@@ -313,6 +323,9 @@ struct TpVideoBorders {
     if ((self = [super initWithContentURL:URL])) {
         // The video should have already been downloaded to the device, but we use this URL for referencing the video.
         _downloadURL = [[params objectForKey:@"downloadURL"] TP_RETAIN];
+
+        // Get the duration of the video.
+        _duration = [[params objectForKey:@"duration"] intValue];
 
         // Determine the time at which we should fire the video completion.
         NSNumber *completionTime = [params objectForKey:@"completionTime"];
@@ -379,6 +392,14 @@ struct TpVideoBorders {
             _downloadNowText = @"Download Now!";
         }
         [_downloadNowText TP_RETAIN];
+
+        // Track whether we ever show the video. We use this to perform proper bookkeeping when the video ends or fails.
+        _didVideoAppear = NO;
+
+        // Remove the default observation of the video finish event - we don't want the video view controller to automatically dismiss itself.
+        [[NSNotificationCenter defaultCenter] removeObserver:self name:MPMoviePlayerPlaybackDidFinishNotification object:self.moviePlayer];
+        // Use our own notification listener for video completion.
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(handleVideoFinish:) name:@"MPMoviePlayerPlaybackDidFinishNotification" object:self.moviePlayer];
     }
     return self;
 }
@@ -422,10 +443,15 @@ struct TpVideoBorders {
 }
 
 - (void)viewDidAppear:(BOOL)animated {
+    // Bookkeeping to allow proper handling of video finish or error.
+    _didVideoAppear = YES;
+
     // Log the offer impression.
     [[TpVideo sharedInstance] fireImpressionForURL:_downloadURL];
     // Create the session, user, and click.
     [[TpVideo sharedInstance] fireClickForURL:_downloadURL];
+    // Create the click for the endcap offer.
+    [[TpVideo sharedInstance] createEndcapClickForURL:_downloadURL];
 
     // Fire the countdown function once now, then create a timer to call it every second afterwards.
     _videoTimeRemaining = VIDEO_TIME_REMAINING_UNITIALIZED;
@@ -438,10 +464,6 @@ struct TpVideoBorders {
     // (If the user presses the download now button, we'll set this to "appStore" before stopping the video.)
     _nextStep = @"endcap";
 
-    // Remove the default observation of the video finish event - we don't want the view view controller to automatically dismiss itself.
-    [[NSNotificationCenter defaultCenter] removeObserver:self name:MPMoviePlayerPlaybackDidFinishNotification object:self.moviePlayer];
-    // Use our own notification listener for video completion.
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(handleVideoFinish:) name:@"MPMoviePlayerPlaybackDidFinishNotification" object:self.moviePlayer];
     [super viewDidAppear:animated];
 }
 
@@ -462,18 +484,28 @@ struct TpVideoBorders {
 }
 
 - (void)handleVideoFinish:(NSNotification *)notification {
-    [_countdownTimer invalidate];
-    if (_videoTimeRemaining <= 0) {
-        // We should have fired the completion by now. Make sure it's been fired.
-        [[TpVideo sharedInstance] fireCompletionIfNotFiredForURL:_downloadURL];
-    }
-    // Move to the next step in our flow.
-    if ([_nextStep isEqualToString:@"appStore"]) {
-        // Open the app store directly.
-        [[TpVideo sharedInstance] openAppStoreFrom:@"video"];
+    if (_didVideoAppear) {
+        [_countdownTimer invalidate];
+        if (_videoTimeRemaining <= 0) {
+            // We should have fired the completion by now. Make sure it's been fired.
+            [[TpVideo sharedInstance] fireCompletionIfNotFiredForURL:_downloadURL];
+        }
+        // Move to the next step in our flow.
+        if ([_nextStep isEqualToString:@"appStore"]) {
+            // Open the app store directly.
+            [[TpVideo sharedInstance] openAppStoreFrom:@"video"];
+        } else {
+            // Open the endcap webview.
+            [[TpVideo sharedInstance] openEndcap:_downloadURL];
+        }
     } else {
-        // Open the endcap webview.
-        [[TpVideo sharedInstance] openEndcap:_downloadURL];
+        // The video finished without ever opening, which is probably because of an invalid video file.
+        TPLog(@"Video ended before it was ever displayed - video file is probably invalid and will be marked as such.");
+        // Mark the video file as invalid.
+        [[TpVideo sharedInstance] markVideoFileInvalid:_downloadURL];
+        // Close the video trailer flow. Don't dismiss the view controller; because we never presented the video
+        // controller, the dismiss call would dismiss the topmost controller instead.
+        [[TpVideo sharedInstance] closeTrailerFlowAndDismissViewController:NO];
     }
 }
 

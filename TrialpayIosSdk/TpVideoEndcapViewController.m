@@ -69,7 +69,7 @@
 }
 
 - (void)nativeExitButtonClick:(UIGestureRecognizer *)gestureRecognizer {
-    [[TpVideo sharedInstance] closeTrailerFlow];
+    [[TpVideo sharedInstance] closeTrailerFlowAndDismissViewController:YES];
 }
 
 - (void)hideNativeExitButton {

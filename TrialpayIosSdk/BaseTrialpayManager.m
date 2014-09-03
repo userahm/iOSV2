@@ -55,7 +55,8 @@ NSString *TPBalanceUpdateActionString  = @"balance_update";
                     TPLog(@"Skip balance update while offerwall is open");
                 }
                 TPLog(@"balanceQueryAndWithdraw before wait for %d", secondsValid);
-                [NSThread sleepForTimeInterval:secondsValid];
+                
+                [TpUtils operation:self sleepFor:secondsValid];
 #if defined(__TRIALPAY_USE_EXCEPTIONS)
             }
             @catch (NSException *exception) {
@@ -63,6 +64,7 @@ NSString *TPBalanceUpdateActionString  = @"balance_update";
             }
 #endif
         }
+        TPLog(@"Exitting balance check");
     }
 }
 @end
@@ -85,7 +87,7 @@ NSString *TPBalanceUpdateActionString  = @"balance_update";
                     secondsValid = TP_AVAILABILITY_DEFAULT_VALIDITY_TIME;
                 }
                 TPLog(@"availabilityCheckOperation for touchpoint %@ before wait for %d", self.touchpointName, secondsValid);
-                [NSThread sleepForTimeInterval:secondsValid];
+                [TpUtils operation:self sleepFor:secondsValid];
 #if defined(__TRIALPAY_USE_EXCEPTIONS)
             }
             @catch (NSException *exception) {
@@ -97,6 +99,7 @@ NSString *TPBalanceUpdateActionString  = @"balance_update";
             }
 #endif
         }
+        TPLog(@"Exitting Availability Check");
     }
 }
 @end
@@ -264,7 +267,7 @@ NSMutableDictionary *_interstitialAvailabilityErrorWaitTimes = nil;
 
 #pragma mark - Get SDK Version
 - (NSString*)sdkVersion {
-    return @"ios.2.2014312";
+    return @"ios.2.2014351";
 }
 
 #pragma mark - BaseTrialpayManager getter/setter

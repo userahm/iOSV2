@@ -39,4 +39,6 @@
 - (IBAction)doneButtonPushed:(id)sender;
 - (IBAction)backButtonPushed:(id)sender;
 
+- (void)adjustOfferwallContainerSize;
+
 @end

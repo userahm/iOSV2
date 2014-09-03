@@ -83,6 +83,8 @@ NSLog(@"[TPLOG] [%50.50s] %@", \
 + (NSString *)genderCodeForValue:(Gender)gender;
 + (Gender)genderValueForCode:(NSString *)genderStr;
 + (NSString *)viewModeString:(TPViewMode)mode;
+
++ (void)operation:(NSOperation*)operation sleepFor:(int)secondsValid;
 @end
 
 @interface TpUserAgent : NSObject

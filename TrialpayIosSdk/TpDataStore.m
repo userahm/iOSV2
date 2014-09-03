@@ -41,7 +41,7 @@ static TpDataStore *__trialpayDataStoreSingleton;
 
 - (NSMutableDictionary *)dataDictionary {
     if (nil == _trialpayManagerDictionary) {
-        NSString *path= [self path];
+        NSString *path = [[self path] TP_RETAIN];
 
         // If the file exists - get the content from there. If not, create an empty dictionary
         if ([[NSFileManager defaultManager] fileExistsAtPath:path]) {
@@ -49,6 +49,7 @@ static TpDataStore *__trialpayDataStoreSingleton;
         } else {
             _trialpayManagerDictionary = [[NSMutableDictionary alloc] init];
         }
+        [path TP_RELEASE];
     }
     return _trialpayManagerDictionary;
 }
@@ -56,8 +57,13 @@ static TpDataStore *__trialpayDataStoreSingleton;
 - (BOOL)saveDataDictionary {
     TPLogEnter;
     if (nil != _trialpayManagerDictionary) {
-        NSString *path= [self path];
-        return [_trialpayManagerDictionary writeToFile:path atomically:YES];
+        // It turns out that writeToFile is a long operation, so if we are not using ARC (ex: Unity)
+        // path may become invalid by memory overwrite and writeToFile crashes on segmentation fault
+        // so we have to retain/release path
+        NSString *path = [[self path] TP_RETAIN];
+        BOOL ret = [_trialpayManagerDictionary writeToFile:path atomically:YES];
+        [path TP_RELEASE];
+        return ret;
     }
     return NO;
 }
@@ -65,7 +71,7 @@ static TpDataStore *__trialpayDataStoreSingleton;
 - (void) clearDataDictionary {
     NSError *error;
     NSFileManager *fileMgr = [NSFileManager defaultManager];
-    NSString *path= [self path];
+    NSString *path= [[self path] TP_RETAIN];
     if ([fileMgr fileExistsAtPath:path]) {
         if ([fileMgr removeItemAtPath:path error:&error] != YES) {
             TPLog(@"Unable to delete file: %@", [error localizedDescription]);
@@ -79,6 +85,7 @@ static TpDataStore *__trialpayDataStoreSingleton;
     } else {
         TPLog(@"File does not exist");
     }
+    [path TP_RELEASE];
 }
 
 - (BOOL)setDataWithValue:(NSObject *)value forKey:(NSString *)key {
