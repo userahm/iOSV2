@@ -9,6 +9,8 @@
 #import "TpUtils.h"
 #import "TpArcSupport.h"
 #import <UIKit/UIKit.h>
+#import <libkern/OSAtomic.h>
+
 
 #if !defined(TRIALPAY_VERBOSE)
 BOOL __trialpayVerbose=NO;
@@ -204,6 +206,35 @@ BOOL __trialpayVerbose=YES;
         totalWait += stepWait;
     }
 }
+
+static volatile BOOL _singleFlowLock = NO;
+static volatile int _singleFlowCount = 0;
++ (BOOL)singleFlowLockWithMessage:(NSString*)name {
+    if (false == OSAtomicTestAndSet(0, &_singleFlowLock)) {
+        _singleFlowCount ++;
+        int pc = _singleFlowCount;
+        TPLog(@"[singleFlowLock] %@", name);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(7 * NSEC_PER_SEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+            // lets force release flow after 7s if never protected by someone else, we seen apptrailer taking 5s to launch on ipod5 ios8
+            if (_singleFlowLock) {
+                if (_singleFlowCount == pc) {
+                    _singleFlowLock = NO;
+                }
+            }
+        });
+        return YES; // proceed on flow
+    } else {
+        TPLog(@"[singleFlowLock] SKIP %@", name);
+    }
+    return NO; // stop flow
+}
+
++ (void)singleFlowUnlockWithMessage:(NSString*)name {
+    TPLog(@"[singleFlowUnlock] %@", name);
+    _singleFlowLock = NO;
+}
+
+
 
 @end
 

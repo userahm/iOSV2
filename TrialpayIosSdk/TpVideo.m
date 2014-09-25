@@ -14,6 +14,7 @@
 #import "TpArcSupport.h"
 #import "TpUtils.h"
 #import "TpConstants.h"
+#import <libkern/OSAtomic.h>
 
 // times given in seconds. in sdk3 these will be controlled by the config.
 int TP_DOWNLOAD_NEXT_VIDEO_DELAY = 10;
@@ -86,6 +87,7 @@ NSTimeInterval TP_DOWNLOAD_FLAG_RESET_INTERVAL = 1200.0; // 20 minutes.
 }
 
 - (void)connection:(NSURLConnection *)connection didReceiveData:(NSData *)receivedData {
+    @autoreleasepool {
     NSString *downloadURL = [[[connection originalRequest] URL] absoluteString];
     // Determine the local file path
     NSString *filePath = [[TpVideo sharedInstance] getLocalVideoPathForURL:downloadURL];
@@ -122,6 +124,7 @@ NSTimeInterval TP_DOWNLOAD_FLAG_RESET_INTERVAL = 1200.0; // 20 minutes.
         if ((expectedFileSize == nil) || (storedBytes >= [expectedFileSize longLongValue])) {
             [[TpVideo sharedInstance] markDownloadCompleteForURL:downloadURL withSuccess:YES withReattempt:NO];
         }
+    }
     }
 }
 
@@ -177,7 +180,7 @@ NSTimeInterval TP_DOWNLOAD_FLAG_RESET_INTERVAL = 1200.0; // 20 minutes.
     TpAppStoreViewController *_storeViewController; // View controller for in-app app store.
     void (^_closeTrailerBlock)(void);
 
-    BOOL _isInVideoFlow;
+    volatile BOOL _isInVideoFlow;
     BOOL _isVideoOpened;
     BOOL _isWebViewLoaded;
     BOOL _isWebViewOpened;
@@ -210,7 +213,7 @@ NSTimeInterval TP_DOWNLOAD_FLAG_RESET_INTERVAL = 1200.0; // 20 minutes.
         }
 
         // Determine the directory for storing local video files. Create the directory if it does not exist.
-        NSString *cachesDirectory = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) lastObject];
+        NSString *cachesDirectory = [NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES) lastObject];
         NSString *tpVidDirectory = [[cachesDirectory stringByAppendingPathComponent:@"tpv"] TP_RETAIN];
         if ([[NSFileManager defaultManager] fileExistsAtPath:tpVidDirectory]) {
             _tpVideoFileDirectory = tpVidDirectory;
@@ -847,11 +850,11 @@ TpVideo *__tpVideoSingleton;
 // completionBlock will be executed when we close the video trailer flow (i.e. from inside closeTrailerFlowAndDismissViewController:). This can be nil.
 - (void)playVideoWithURL:(NSString *)downloadURL fromViewController:(UIViewController *)baseViewController withBlock:(void (^)(void))completionBlock {
     // Check if we already have the video up, this prevents a "double-click" making 2 video objects to run, resulting in frozen UI. (iOS6/iphone4)
-    if (_isInVideoFlow) {
+    if (OSAtomicTestAndSet(0, &_isInVideoFlow)) {
         // Don't fire the completion block because the user is already viewing a valid trailer flow, which will fire its own completion block.
+        [TpUtils singleFlowUnlockWithMessage:@"playVideo"];
         return;
     }
-    _isInVideoFlow = YES;
     _isVideoOpened = NO; // We'll set to YES once we've presented the video view controller.
 
     // Store the baseViewController. We don't retain or release this because we don't own it.
@@ -867,6 +870,7 @@ TpVideo *__tpVideoSingleton;
         TPLog(@"Video resource %@ is not stored locally. Aborting video playback.", downloadURL);
         [self fireCloseTrailerBlock];
         _isInVideoFlow = NO;
+        [TpUtils singleFlowUnlockWithMessage:@"playVideo"];
         return;
     }
     NSString *filePath = [self getLocalVideoPathForURL:downloadURL];
@@ -874,6 +878,7 @@ TpVideo *__tpVideoSingleton;
         TPLog(@"Cannot determine local video file path for resource %@. Aborting video playback.", downloadURL);
         [self fireCloseTrailerBlock];
         _isInVideoFlow = NO;
+        [TpUtils singleFlowUnlockWithMessage:@"playVideo"];
         return;
     }
 
@@ -929,12 +934,14 @@ TpVideo *__tpVideoSingleton;
 // Close the entire video trailer flow.
 // We should attempt to dismiss the view controller unless the controller was never presented.
 - (void)closeTrailerFlowAndDismissViewController:(BOOL)shouldDismissViewController {
+    TPLogEnter;
     [self stopEndcapWebViewLoading];
     [self revertStatusBar];
 
     // Prepare the block for final processing of the video flow
     void (^finalBlock)(void) = ^{
         _isInVideoFlow = NO;
+        [TpUtils singleFlowUnlockWithMessage:@"playVideo"];
         _isVideoOpened = NO;
         _isWebViewOpened = NO;
         _isStoreViewOpened = NO;
@@ -1037,7 +1044,12 @@ TpVideo *__tpVideoSingleton;
         _isWebViewOpened = YES;
         [_videoViewController presentViewController:_endcapViewController animated:YES completion:nil];
         // Ensure the webview is sized to the view controller.
-        _endcapWebView.frame = _endcapViewController.view.bounds;
+        CGRect frame = _endcapViewController.view.bounds;
+        // on iOS8, the frames seems to be reported inverted, as we expect this to be landscape always, lets force transposing the frames.
+        if (frame.size.height > frame.size.width) {
+            frame = CGRectMake(frame.origin.y, frame.origin.x, frame.size.height, frame.size.width);
+        }
+        _endcapWebView.frame = frame;
 
         // Pass the click ID to the endcap. We may not have this yet, but will call this again when the click API completes.
         [self provideEndcapWithClickID:[self getMetaDataWithKey:@"endcapClickID" forURL:downloadURL]];

@@ -1,4 +1,4 @@
-TrialPay iOS SDK (v2.2014351)
+TrialPay iOS SDK (v2.2014391)
 ================
 
 Thanks for choosing TrialPay!
@@ -9,6 +9,18 @@ Thanks for choosing TrialPay!
 - [Help and API Reference](http://help.trialpay.com/docs/iOS/index.html)
 
 ### Changelog
+
+#### Version 2.2014391
+
+- iOS8 compatibility: 
+  - Preventing low performing devices to enter multiple flows
+  - App trailer UI fixes for iOS8 (position of closing "x" + download screen size) 
+  - Memory management improvements 
+
+<span style="color:red">
+_** We observed that projects that dont have a launch screen are being scaled on iphone 6/6+.
+The scaling seems to be the underlying cause for multiple UI issues: improper keyboard and offset views._
+</span>
 
 #### Version 2.2014351
 

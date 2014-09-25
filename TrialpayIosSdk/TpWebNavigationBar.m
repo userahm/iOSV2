@@ -24,6 +24,13 @@ NSMutableArray* jsCommands;
     return self;
 }
 
+- (void)stopWebView {
+    TPLogEnter;
+    self.delegate = nil;
+    [self stopLoading];
+    self.tpDelegate = nil;
+}
+
 /*
  * Being called when the view is being drawn
  *

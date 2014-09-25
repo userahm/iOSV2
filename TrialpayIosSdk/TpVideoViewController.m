@@ -53,7 +53,10 @@ int VIDEO_TIME_REMAINING_UNITIALIZED = -10;
 
 - (CGSize)getVideoViewFrameSize {
     CGSize viewFrameSize = self.view.frame.size;
-    viewFrameSize = CGSizeMake(viewFrameSize.height, viewFrameSize.width); // We're displaying in landscape mode so swap the parameters.
+    // on iOS8, the frames seems to be reported inverted, as we expect this to be landscape always, lets force transposing the frames.
+    if (viewFrameSize.height > viewFrameSize.width) {
+        viewFrameSize = CGSizeMake(viewFrameSize.height, viewFrameSize.width);
+    }
     return viewFrameSize;
 }
 

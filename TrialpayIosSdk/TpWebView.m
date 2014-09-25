@@ -395,7 +395,9 @@
                       duration:0.5
                       options:UIViewAnimationOptionTransitionCrossDissolve
                       animations:[[animationBlock copy] TP_AUTORELEASE]
-                      completion:nil];
+                    completion:^(BOOL a){
+                        [TpUtils singleFlowUnlockWithMessage:@"loadDetails"];
+                    }];
     
     self.webViewContainer = self.offerContainer;
     [self setupNavigationBarUsingBack:YES];
@@ -448,8 +450,6 @@
 }
 
 #pragma mark - webView (UIWebViewDelegate)
-/* Part of Trialpay's integration instructions
- */
 - (BOOL)webView:(UIWebView *)webView shouldStartLoadWithRequest:(NSURLRequest *)request navigationType:(UIWebViewNavigationType)navigationType {
     self.currentRequest = request;
     TPLog(@"webView:%@ shouldStartLoadWithRequest:%@ navigationType:%d", [self getWebViewName:webView], [[request URL] absoluteString], (int)navigationType);
@@ -473,7 +473,9 @@
                 if ([request.URL.absoluteString rangeOfString:@"tp_base_page=1"].location != NSNotFound) {
                     return YES;
                 } else {
-                    [self loadOfferContainerWithRequest:request];
+                    if ([TpUtils singleFlowLockWithMessage:@"loadDetails"]) {
+                        [self loadOfferContainerWithRequest:request];
+                    }
                     return NO;
                 }
             } else {
@@ -515,7 +517,9 @@
     // if the special protocol starts with "tpvideo", stop the URL load and open the video within our video trailer flow.
     if ([request.URL.absoluteString hasPrefix:kTPKeyVideoPrefix]) {
         NSString *videoResourceURL = [request.URL.absoluteString substringFromIndex:[kTPKeyVideoPrefix length]];
-        [self.delegate playVideoWithURL:videoResourceURL];
+        if ([TpUtils singleFlowLockWithMessage:@"playVideo"]) {
+            [self.delegate playVideoWithURL:videoResourceURL];
+        }
         return NO;
     }
 
@@ -751,6 +755,14 @@
     [self.offerwallContainer stopLoading];
     self.offerContainer.delegate = nil;
     [self.offerContainer stopLoading];
+
+    [self.webNavigationBar stopWebView];
+    
+    // this is mostly to help seeing release calls when tracing memory leaks
+    self.offerwallContainer = nil;
+    self.offerContainer = nil;
+    self.webViewContainer = nil;
+    self.webNavigationBar = nil;
 }
 
 - (void)adjustOfferwallContainerSize
@@ -763,6 +775,8 @@
         [self layoutIfNeeded];
         
         CGRect originaFrame = self.offerwallContainer.frame;
+        
+        [self.offerwallContainer stringByEvaluatingJavaScriptFromString:@"window.setAdjustMode()"];
         
         CGFloat width = [[self.offerwallContainer stringByEvaluatingJavaScriptFromString:@"document.documentElement.offsetWidth"] floatValue];
         CGFloat height = [[self.offerwallContainer stringByEvaluatingJavaScriptFromString:@"document.documentElement.offsetHeight"] floatValue];

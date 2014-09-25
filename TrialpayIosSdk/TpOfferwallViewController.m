@@ -30,6 +30,7 @@
 
 - (void)dealloc {
     // Help ARC release the memory faster
+    self.tpWebView.delegate = nil; // release delegate on close
     [self.tpWebView stopWebViews];
     // lets help ARC to claim memory back faster
     self.view = nil;
@@ -56,11 +57,15 @@
 #pragma mark - Done button pushed - for done button selector
 - (void)tpWebView:(TpWebView *)tpWebView donePushed:(id)sender {
     TPLogEnter;
-    void (^completionBlock)(void) = ^{
-        [self.delegate closeTouchpoint:_touchpointName];
-        self.tpWebView.delegate = nil; // release delegate on close
-    };
-    [self dismissViewControllerAnimated:YES completion:[[completionBlock copy] TP_AUTORELEASE]];
+    if ([TpUtils singleFlowLockWithMessage:@"donePushed"]) {
+        // dispatch sync forces a synchronization of the main thread, preventing multiple
+        void (^completionBlock)(void) = ^{
+            TPLog(@"Completion block %@", _touchpointName);
+            [self.delegate closeTouchpoint:_touchpointName];
+            [TpUtils singleFlowUnlockWithMessage:@"donePushed"];
+        };
+        [self dismissViewControllerAnimated:YES completion:[[completionBlock copy] TP_AUTORELEASE]];
+    }
 }
 
 #pragma mark - Opening a video trailer from the offerwall

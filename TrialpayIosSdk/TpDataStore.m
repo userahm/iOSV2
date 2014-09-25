@@ -55,15 +55,29 @@ static TpDataStore *__trialpayDataStoreSingleton;
 }
 
 - (BOOL)saveDataDictionary {
-    TPLogEnter;
+//    TPLogEnter;
     if (nil != _trialpayManagerDictionary) {
         // It turns out that writeToFile is a long operation, so if we are not using ARC (ex: Unity)
         // path may become invalid by memory overwrite and writeToFile crashes on segmentation fault
         // so we have to retain/release path
         NSString *path = [[self path] TP_RETAIN];
-        BOOL ret = [_trialpayManagerDictionary writeToFile:path atomically:YES];
+
+        // Lets prevent writing it too often, the idea here is to postpone writing until we dont have changes for a while.
+        // Than save once. We create many dispatches with that approach though, as dispatches are lightweight, this should be fine.
+        static NSDate *__datastoreChangedOn = nil;
+        __datastoreChangedOn = [NSDate date];
+        float waitTime = 1;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(waitTime * NSEC_PER_SEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+            @synchronized(self) { // our toplevel function was protected by sync to prevent double writing file, so lets keep it protected.
+                if ([__datastoreChangedOn timeIntervalSinceNow] < -waitTime) { // its been enough time without change
+                    [_trialpayManagerDictionary writeToFile:path atomically:YES];
+                    // now, lets prevent subsequent saves, by reseting counter, worst case a new date and dispatch will happen subsequently
+                    __datastoreChangedOn = nil;
+                }
+            };
+        });
         [path TP_RELEASE];
-        return ret;
+        return YES;
     }
     return NO;
 }
@@ -89,7 +103,7 @@ static TpDataStore *__trialpayDataStoreSingleton;
 }
 
 - (BOOL)setDataWithValue:(NSObject *)value forKey:(NSString *)key {
-    TPLog(@"setDataWithValue:%@ forKey:%@)", value, key);
+//    TPLog(@"setDataWithValue:%@ forKey:%@", value, key);
     NSMutableDictionary* dict = [self dataDictionary];
     @synchronized (self) {
         [dict setValue:value forKey:key];
@@ -99,7 +113,7 @@ static TpDataStore *__trialpayDataStoreSingleton;
 }
 
 - (id)dataValueForKey:(NSString *)key {
-    TPLog(@"dataValueForKey:%@", key);
+//    TPLog(@"dataValueForKey:%@", key);
     NSDictionary *trialpayManagerDictionary = [self dataDictionary];
     return [trialpayManagerDictionary valueForKey:key];
 }

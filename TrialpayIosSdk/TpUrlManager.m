@@ -166,7 +166,8 @@ TpUrlManager *__TrialPayURLManagerSingleton = nil;
     } else {
         // DS offer URL does not contain common query params
         url = [[[BaseTrialpayManager sharedInstance] urlForDealspotTouchpoint:touchpointName] mutableCopy];
-        [url appendFormat:@"&%@", [TpUrlManager buildQueryString:@"tp_base_page", @"1", TP_END_QUERY]];
+        if ([url rangeOfString:@"tp_base_page=1"].location == NSNotFound)
+            [url appendFormat:@"&%@", [TpUrlManager buildQueryString:@"tp_base_page", @"1", TP_END_QUERY]];
     }
 
     return url;

@@ -39,14 +39,14 @@ typedef enum {
 // Create TPLog - a debug call available on debug mode only
 #ifdef DEBUG
 
-#define TPLogLine(format, ...)  NSLog(@"[%s] %@", \
-[[NSString stringWithFormat:@"%@:%d", [[NSString stringWithFormat:@"%s", __FILE__] lastPathComponent] , __LINE__] UTF8String], \
+#define TPLogLine(format, ...)  NSLog(@"[%@] %@", \
+[NSString stringWithFormat:@"%@:%d", [[NSString stringWithFormat:@"%s", __FILE__] lastPathComponent] , __LINE__], \
 [NSString stringWithFormat:format, ##__VA_ARGS__])
 
 #define TPLogFunction(format, ...)  \
-NSLog(@"[TPLOG] [%50.50s] %@", \
-[[NSString stringWithFormat:@"%@:%d", \
-[NSString stringWithFormat:@"%s", __FUNCTION__] , __LINE__] UTF8String], \
+NSLog(@"[TPLOG] [%50.50@] %@", \
+[NSString stringWithFormat:@"%@:%d", \
+[NSString stringWithFormat:@"%s", __FUNCTION__] , __LINE__], \
 [NSString stringWithFormat:format, ##__VA_ARGS__])
 
 #define TPLog TPLogLine
@@ -62,9 +62,9 @@ NSLog(@"[TPLOG] [%50.50s] %@", \
 #endif
 
 // Customer logging
-#define TPCustomerLog(localized, format, ...) NSLog(@"TrialpayManager: %s", [[NSString stringWithFormat:NSLocalizedString(format, localized), ##__VA_ARGS__] UTF8String]);
-#define TPCustomerError(localized, format, ...) NSLog(@"ERROR: TrialpayManager: %s", [[NSString stringWithFormat:NSLocalizedString(format, localized), ##__VA_ARGS__] UTF8String]);
-#define TPCustomerWarning(localized, format, ...) NSLog(@"WARN: TrialpayManager: %s", [[NSString stringWithFormat:NSLocalizedString(format, localized), ##__VA_ARGS__] UTF8String]);
+#define TPCustomerLog(localized, format, ...) NSLog(@"TrialpayManager: %@", [NSString stringWithFormat:NSLocalizedString(format, localized), ##__VA_ARGS__]);
+#define TPCustomerError(localized, format, ...) NSLog(@"ERROR: TrialpayManager: %@", [NSString stringWithFormat:NSLocalizedString(format, localized), ##__VA_ARGS__]);
+#define TPCustomerWarning(localized, format, ...) NSLog(@"WARN: TrialpayManager: %@", [NSString stringWithFormat:NSLocalizedString(format, localized), ##__VA_ARGS__]);
 
 // for use with dispatch_after...
 #define TP_DISPATCH_TIME(delayInSeconds) dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delayInSeconds * NSEC_PER_SEC))
@@ -85,6 +85,9 @@ NSLog(@"[TPLOG] [%50.50s] %@", \
 + (NSString *)viewModeString:(TPViewMode)mode;
 
 + (void)operation:(NSOperation*)operation sleepFor:(int)secondsValid;
++ (BOOL)singleFlowLockWithMessage:(NSString*)name;
++ (void)singleFlowUnlockWithMessage:(NSString*)name;
+
 @end
 
 @interface TpUserAgent : NSObject

@@ -17,6 +17,8 @@
 
 - (id)initWithFrame:(CGRect)frame touchpointName:(NSString *)touchpointName;
 
+- (void)stopWebView;
+
 - (void)executeCommand:(NSString *)jsCommand;
 
 - (void)showSpinner;
