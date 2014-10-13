@@ -22,10 +22,8 @@ Thanks for choosing TrialPay!
   - App trailer UI fixes for iOS8 (position of closing "x" + download screen size) 
   - Memory management improvements 
 
-<span style="color:red">
-_** We observed that projects that dont have a launch screen are being scaled on iphone 6/6+.
-The scaling seems to be the underlying cause for multiple UI issues: improper keyboard and offset views._
-</span>
+##### _** We observed that projects that don't have a launch screen break some iOS UI components such as keyboard and in app store pages. This might also affect apps that were not correctly upgraded to be used on the new XCode 6.0.1._
+
 
 #### Version 2.2014351
 
