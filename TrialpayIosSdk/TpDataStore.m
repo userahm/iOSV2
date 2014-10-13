@@ -65,13 +65,14 @@ static TpDataStore *__trialpayDataStoreSingleton;
         // Lets prevent writing it too often, the idea here is to postpone writing until we dont have changes for a while.
         // Than save once. We create many dispatches with that approach though, as dispatches are lightweight, this should be fine.
         static NSDate *__datastoreChangedOn = nil;
-        __datastoreChangedOn = [NSDate date];
+        __datastoreChangedOn = [[NSDate date] TP_RETAIN];
         float waitTime = 1;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(waitTime * NSEC_PER_SEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
             @synchronized(self) { // our toplevel function was protected by sync to prevent double writing file, so lets keep it protected.
-                if ([__datastoreChangedOn timeIntervalSinceNow] < -waitTime) { // its been enough time without change
+                if (__datastoreChangedOn != nil && [__datastoreChangedOn timeIntervalSinceNow] < -waitTime) { // its been enough time without change
                     [_trialpayManagerDictionary writeToFile:path atomically:YES];
                     // now, lets prevent subsequent saves, by reseting counter, worst case a new date and dispatch will happen subsequently
+                    [__datastoreChangedOn TP_RELEASE];
                     __datastoreChangedOn = nil;
                 }
             };

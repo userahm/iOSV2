@@ -1,4 +1,4 @@
-TrialPay iOS SDK (v2.2014391)
+TrialPay iOS SDK (v2.2014410)
 ================
 
 Thanks for choosing TrialPay!
@@ -9,6 +9,11 @@ Thanks for choosing TrialPay!
 - [Help and API Reference](http://help.trialpay.com/docs/iOS/index.html)
 
 ### Changelog
+
+#### Version 2.2014410
+
+- iOS8 compatibility: more fixes
+- Improving app trailer tracking
 
 #### Version 2.2014391
 

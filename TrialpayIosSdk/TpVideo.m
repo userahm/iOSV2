@@ -555,7 +555,13 @@ TpVideo *__tpVideoSingleton;
 // extraBlock is optional (use nil if no block is needed). If provided, this block will fire when the pixel completes.
 - (void)firePixel:(NSString *)pixelName forURL:(NSString *)downloadURL withBlock:(void (^)(NSURLResponse *, NSData *, NSError *))extraBlock {
     NSURL *URL = [NSURL URLWithString:[self getMetaDataWithKey:pixelName forURL:downloadURL]];
-    NSURLRequest *pixelRequest = [NSURLRequest requestWithURL:URL];
+    NSString *userAgent = [TpUserAgent sharedInstance].userAgent; // user agent should be populated because the availability check has already started
+    NSMutableURLRequest *pixelRequest = [NSMutableURLRequest requestWithURL:URL];
+    if (userAgent != nil) {
+        // Manually set the user agent to that used by the webview. Otherwise the user agent for
+        // NSConnection is "<app name> CFNetwork/672.0.8 Darwin/13.3.0", from which we can't get device information.
+        [pixelRequest setValue:userAgent forHTTPHeaderField:@"user-agent"];
+    }
     void (^completionBlock)(NSURLResponse*, NSData*, NSError*) = ^(NSURLResponse *response, NSData *data, NSError *error) {
         NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
         NSInteger statusCode = [httpResponse statusCode];

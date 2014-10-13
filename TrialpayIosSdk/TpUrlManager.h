@@ -37,10 +37,8 @@ typedef enum {
 + (NSString *)balancePathWithVic:(NSString *)vic andSid:(NSString *)sid;
 + (NSString *)balancePathWithVic:(NSString *)vic andSid:(NSString *)sid usingBalanceInfo:(NSDictionary *)balanceInfo;
 
-#if defined(TRIALPAY_ALLOW_CUSTOM_PATH)
 + (BOOL)hasCustomPrefixUrl:(TPPrefixUrl)prefixUrl;
 + (void)setCustomValue:(NSString *)customPrefixUrl forPrefixUrl:(TPPrefixUrl)prefixUrl;
-#endif
 
 - (NSString *)offerwallUrlForTouchpoint:(NSString *)touchpointName;
 - (NSString *)customParamString:(BOOL)clearParams;

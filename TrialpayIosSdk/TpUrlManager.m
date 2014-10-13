@@ -119,6 +119,14 @@ TpUrlManager *__TrialPayURLManagerSingleton = nil;
     TPLog(@"Setting %@: %@", key, customPrefixUrl);
     [[TpDataStore sharedInstance] setDataWithValue:customPrefixUrl forKey:key];
 }
+#else
++ (BOOL)hasCustomPrefixUrl:(TPPrefixUrl)prefixUrl {
+    TPCustomerError(@"Custom URLs are ignored unless TRIALPAY_ALLOW_CUSTOM_PATH is set", @"Custom URLs are ignored unless TRIALPAY_ALLOW_CUSTOM_PATH is set");
+    return NO;
+}
++ (void)setCustomValue:(NSString *)customPrefixUrl forPrefixUrl:(TPPrefixUrl)prefixUrl {
+    TPCustomerError(@"Custom URLs are ignored unless TRIALPAY_ALLOW_CUSTOM_PATH is set", @"Custom URLs are ignored unless TRIALPAY_ALLOW_CUSTOM_PATH is set");
+}
 #endif
 
 #pragma mark - Build URLS
